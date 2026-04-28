@@ -8,6 +8,7 @@ import TimelinePage from '@/pages/TimelinePage';
 import WorkspacePage from '@/pages/WorkspacePage';
 import ConsensusPage from '@/pages/ConsensusPage';
 import StakeholdersPage from '@/pages/StakeholdersPage';
+import DemoPage from '@/pages/DemoPage';
 import { useLang } from '@/i18n/LangContext';
 import { supabase } from '@/lib/supabase';
 
@@ -65,6 +66,7 @@ export default function App() {
         path="/"
         element={user ? <Navigate to="/hub" replace /> : <LoginPage />}
       />
+      <Route path="/demo" element={<DemoPage />} />
 
       <Route element={<Layout user={user} />}>
         <Route path="/hub" element={<HubPage user={user} />} />
