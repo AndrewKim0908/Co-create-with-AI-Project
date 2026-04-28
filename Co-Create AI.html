@@ -1,0 +1,1187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Co-Create AI — Decision Sprint Platform</title>
+<style>
+@font-face {
+  font-family: 'Inter';
+  src: url('fonts/InterVariable.ttf') format('truetype');
+  font-weight: 100 900;
+  font-style: normal;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body, #root { height: 100%; }
+body { font-family: 'Inter', system-ui, sans-serif; background: #FAFBFC; overflow: hidden; -webkit-font-smoothing: antialiased; }
+button { font-family: inherit; cursor: pointer; }
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #C5D0D9; border-radius: 3px; }
+
+@keyframes pulse-ring {
+  0%   { box-shadow: 0 0 0 0 rgba(208,80,69,0.6), 0 0 0 0 rgba(208,80,69,0.3); }
+  70%  { box-shadow: 0 0 0 8px rgba(208,80,69,0), 0 0 0 14px rgba(208,80,69,0); }
+  100% { box-shadow: 0 0 0 0 rgba(208,80,69,0), 0 0 0 0 rgba(208,80,69,0); }
+}
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.7; transform: scale(1.15); }
+}
+@keyframes option-glow {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(30,138,90,0.4), 0 4px 16px rgba(30,138,90,0.12); }
+  50% { box-shadow: 0 0 0 3px rgba(30,138,90,0.7), 0 6px 24px rgba(30,138,90,0.22); }
+}
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(16px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+.fade-in { animation: fadeIn 0.3s cubic-bezier(0.2,0,0,1) both; }
+.slide-in { animation: slideIn 0.25s cubic-bezier(0.2,0,0,1) both; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+
+<!-- Extracted components (loaded as Babel scripts; they share global script
+     scope with the inline script below, which is how @babel/standalone works
+     when there is no build step). Sidebar.jsx defines `Sidebar` and
+     `SideNavItem` and is rendered as <Sidebar /> inside <App />. -->
+<script type="text/babel" src="src/components/Sidebar.jsx"></script>
+
+<script type="text/babel">
+const { useState, useEffect, useRef, useContext, createContext } = React;
+
+// ─── COLORS ─────────────────────────────────────────────────
+const C = {
+  bg: '#FAFBFC', subtle: '#F4F6F8', muted: '#E2E8ED',
+  fg1: '#1E2A35', fg2: '#3A4A58', fg3: '#62788A', fg4: '#9BAAB7',
+  border: '#C5D0D9', borderSubtle: '#E2E8ED',
+  emerald: '#1E8A5A', emeraldHover: '#1A7A4F', emeraldLight: '#EDFAF3', emeraldBorder: '#8EDDB8',
+  coral: '#D05045', coralHover: '#C0423A', coralLight: '#FDF4F3', coralBorder: '#F2B8B4',
+  navy: '#1E2A35', navyDark: '#131C24',
+  amber: '#C88A1A', amberLight: '#FFFBF0',
+  white: '#FFFFFF',
+};
+
+// ─── I18N ────────────────────────────────────────────────────
+const LangCtx = createContext('en');
+const useLang = () => useContext(LangCtx);
+
+const TRANSLATIONS = {
+  en: {
+    // Platform
+    platformName: 'Co-Create AI',
+    platformSub: 'Decision Sprint Platform',
+
+    // Language switcher
+    langEn: 'EN', langKo: '한', langZh: '中',
+
+    // Login
+    loginHeading: 'Select your role to continue',
+    loginSub: 'Your role determines your permissions and decision weight in this sprint.',
+    enterBtn: 'Enter Decision Sprint',
+    loginFooter: 'Sprint #14 · EV Thermal Module A · 12 stakeholders active',
+    roleEngineer: 'Hardware Engineer',
+    roleEngineerSub: 'Structural & thermal analysis',
+    roleDesigner: 'Product Designer',
+    roleDesignerSub: 'Form factor & UX requirements',
+    roleLead: 'Lead User',
+    roleLeadSub: 'Field requirements & validation',
+
+    // Sidebar nav
+    navHub: 'Project Hub',
+    navSprints: 'Decision Sprints',
+    navConflicts: 'Conflicts',
+    navTimeline: 'Sprint Timeline',
+    navStakeholders: 'Stakeholders',
+    navReports: 'Reports',
+    navSettings: 'Settings',
+    navHelp: 'Help & docs',
+    activeSprint: 'Active Sprint',
+    conflictsOpen: 'conflicts open',
+
+    // Topbar
+    back: 'Back',
+    liveSession: 'Live session',
+
+    // Status badges
+    statusActive: 'Active',
+    statusConflict: 'Conflict',
+    statusResolved: 'Resolved',
+    statusPending: 'Pending',
+    statusDeadlock: 'Deadlock',
+    statusInProgress: 'In Progress',
+
+    // Hub
+    hubTitle: 'Project Hub',
+    hubWelcome: 'Welcome back',
+    kpiActiveProjects: 'Active projects',
+    kpiActiveProjectsSub: '4 total in org',
+    kpiOpenConflicts: 'Open conflicts',
+    kpiOpenConflictsSub: '↑ 2 this week',
+    kpiConsensus: 'Avg consensus rate',
+    kpiConsensusSub: 'Target ≥ 80%',
+    kpiSprints: 'Decision sprints',
+    kpiSprintsSub: 'All time',
+    projects: 'Projects',
+    newProject: 'New project',
+    conflicts: 'Conflicts',
+    consensus: 'Consensus',
+    progress: 'Progress',
+    risk: 'risk',
+    updated: 'Updated',
+    riskHigh: 'High', riskMedium: 'Medium', riskLow: 'Low',
+
+    // Timeline
+    timelineTitle: 'Sprint Timeline',
+    timelineSub: 'EV Thermal Module A · Sprint history',
+    timelineHistory: 'Decision Sprint History · EV Thermal Module A',
+    openSprint: 'Open sprint',
+    rejectionReason: 'Rejection reason:',
+    consensusLabel: 'consensus',
+    ev1title: 'Module A Thermal Review',
+    ev1desc: 'Engineer vs Designer deadlock on mounting tolerance. AI proposed Option C: variable-tolerance adaptive gasket.',
+    ev2title: 'Module B Enclosure Check',
+    ev2desc: 'Wall thickness conflict resolved via AI mediation. Agreed 2.0mm with reinforced corners.',
+    ev3title: 'PCB Layout Sprint',
+    ev3desc: 'Connector J4 placement resolved. Option A (shift 4mm) adopted after thermal validation.',
+    ev4title: 'Frame Mounting System',
+    ev4desc: 'V1 rejected — thermal clearance insufficient at 45°C. V2 re-submitted with 3mm spacer.',
+    ev4reject: 'Thermal clearance below spec at operating temp',
+    ev5title: 'Cooling Loop Layout',
+    ev5desc: 'All 5 conflicts resolved within sprint window. Record consensus rate achieved.',
+
+    // Workspace
+    workspaceTitle: 'Sprint #14 — EV Thermal Module A',
+    workspaceSub: 'CF-01 active · Deadlock detected · AI mediation in progress',
+    aiMediation: 'AI Mediation',
+    live: 'Live',
+    addComment: 'Add comment…',
+    cfTitle: 'Mounting point tolerance',
+    cfHeader: 'CF-01 · Active Conflict',
+    cfMeta: 'HW-229 · Module A · 3 stakeholders',
+    positions: 'Positions',
+    posEngineer: 'Accept ±0.5mm tolerance',
+    posDesigner: 'Require ±0.3mm tolerance',
+    valueMatrix: 'Value conflict matrix',
+    optionCLabel: 'Option C — AI Proposal',
+    optionCNew: 'NEW',
+    optionCTitle: 'Adaptive Gasket System',
+    optionCDesc: 'Variable-hardness gasket (Shore A 45–62) absorbs ±0.5mm variance while meeting ±0.3mm structural spec. Validated in EV-EN Module B.',
+    metaLeadTime: 'Lead time', metaRisk: 'Risk delta', metaConf: 'Conf.',
+    approveBtn: 'Approve Option C',
+    rejectBtn: 'Reject proposal',
+    radarCost: 'Cost', radarPerf: 'Performance', radarDura: 'Durability', radarMfg: 'Mfg', radarTime: 'Timeline', radarSafe: 'Safety',
+
+    // Chat messages
+    chatSys1: 'Sprint #14 · CF-01 activated. 3 stakeholders assigned.',
+    chatDeadlock: 'Deadlock detected — positions unchanged after 3 exchanges. Initiating AI mediation.',
+    chatMsg1: 'I reviewed the thermal clearance. We need ±0.3mm max — anything above that risks vibration fatigue at the mounting points.',
+    chatMsg2: 'We tested both extremes in the last cycle. The ±0.5mm gives us manufacturing flexibility we actually need. ±0.3 would add 2 weeks to the production ramp.',
+    chatMsg3: 'That is not acceptable. The structural spec requires ±0.3 or the warranty is void.',
+    chatAI1: 'I have analyzed both positions and identified a structural conflict between timeline constraints and warranty compliance. Based on material science data from 3 comparable projects, I am proposing Option C — an adaptive tolerance solution.',
+    chatOptionC: 'Option C: Adaptive Gasket System — Variable-hardness gasket compound (Shore A 45–62) absorbs ±0.5mm variance while maintaining structural integrity equivalent to ±0.3mm rigid spec. Validated in EV-EN Module B. Adds 3 days, not 2 weeks.',
+    optionCProposed: 'Option C Proposed',
+
+    // Consensus
+    consensusTitle: 'Consensus reached',
+    consensusSub: 'Option C approved by all stakeholders · Sprint #14',
+    decisionRecord: 'Decision Record · CF-01',
+    drConflict: 'Conflict',
+    drResolution: 'Resolution',
+    drOutcome: 'Outcome',
+    drApprovals: 'Approvals',
+    drConflictVal: 'CF-01 · Mounting point tolerance — EV Thermal Module A',
+    drResolutionVal: 'Option C: Adaptive Gasket System (Shore A 45–62 variable compound)',
+    drOutcomeVal: 'Structural integrity equivalent to ±0.3mm rigid spec. Lead time: +3 days vs. +14 days for redesign.',
+    drApprovalsVal: 'Lee Sungmin (Engineer) · Andrew Kim (Designer) · Kim Jiyeon (Lead User)',
+    exportBtn: 'Export decision record',
+    backSprint: 'Back to sprint',
+    consensusOutput: 'Consensus Output',
+    consensusOutputSub: 'Sprint #14 · Decision record',
+  },
+
+  ko: {
+    platformName: 'Co-Create AI',
+    platformSub: '의사결정 스프린트 플랫폼',
+    langEn: 'EN', langKo: '한', langZh: '中',
+    loginHeading: '역할을 선택하여 계속하세요',
+    loginSub: '선택한 역할에 따라 권한과 의사결정 가중치가 결정됩니다.',
+    enterBtn: '의사결정 스프린트 입장',
+    loginFooter: '스프린트 #14 · EV 열 모듈 A · 이해관계자 12명 접속 중',
+    roleEngineer: '하드웨어 엔지니어',
+    roleEngineerSub: '구조 및 열 해석',
+    roleDesigner: '제품 디자이너',
+    roleDesignerSub: '폼팩터 및 UX 요구사항',
+    roleLead: '리드 유저',
+    roleLeadSub: '현장 요구사항 및 검증',
+    navHub: '프로젝트 허브',
+    navSprints: '의사결정 스프린트',
+    navConflicts: '충돌 관리',
+    navTimeline: '스프린트 타임라인',
+    navStakeholders: '이해관계자',
+    navReports: '리포트',
+    navSettings: '설정',
+    navHelp: '도움말',
+    activeSprint: '진행 중인 스프린트',
+    conflictsOpen: '건 충돌 진행 중',
+    back: '뒤로',
+    liveSession: '실시간 세션',
+    statusActive: '진행 중',
+    statusConflict: '충돌',
+    statusResolved: '해결됨',
+    statusPending: '보류',
+    statusDeadlock: '교착 상태',
+    statusInProgress: '진행 중',
+    hubTitle: '프로젝트 허브',
+    hubWelcome: '환영합니다',
+    kpiActiveProjects: '활성 프로젝트',
+    kpiActiveProjectsSub: '조직 내 총 4개',
+    kpiOpenConflicts: '미해결 충돌',
+    kpiOpenConflictsSub: '↑ 이번 주 2건 증가',
+    kpiConsensus: '평균 합의율',
+    kpiConsensusSub: '목표 ≥ 80%',
+    kpiSprints: '의사결정 스프린트',
+    kpiSprintsSub: '누적 합계',
+    projects: '프로젝트',
+    newProject: '새 프로젝트',
+    conflicts: '충돌',
+    consensus: '합의율',
+    progress: '진행률',
+    risk: '리스크',
+    updated: '업데이트',
+    riskHigh: '높음', riskMedium: '보통', riskLow: '낮음',
+    timelineTitle: '스프린트 타임라인',
+    timelineSub: 'EV 열 모듈 A · 스프린트 히스토리',
+    timelineHistory: '의사결정 스프린트 히스토리 · EV 열 모듈 A',
+    openSprint: '스프린트 열기',
+    rejectionReason: '거부 사유:',
+    consensusLabel: '합의율',
+    ev1title: '모듈 A 열 검토',
+    ev1desc: '마운팅 공차 문제로 엔지니어-디자이너 교착 상태 발생. AI가 Option C: 가변 공차 적응형 개스킷 제안.',
+    ev2title: '모듈 B 외장 검토',
+    ev2desc: 'AI 중재를 통해 벽 두께 충돌 해결. 강화 코너 2.0mm로 합의.',
+    ev3title: 'PCB 레이아웃 스프린트',
+    ev3desc: '커넥터 J4 배치 해결. 열 검증 후 옵션 A (4mm 이동) 채택.',
+    ev4title: '프레임 마운팅 시스템',
+    ev4desc: 'V1 거부 — 45°C에서 열 간격 부족. V2 3mm 스페이서 추가 후 재제출.',
+    ev4reject: '작동 온도에서 열 간격이 사양 미달',
+    ev5title: '냉각 루프 레이아웃',
+    ev5desc: '스프린트 기간 내 5건 충돌 모두 해결. 역대 최고 합의율 달성.',
+    workspaceTitle: '스프린트 #14 — EV 열 모듈 A',
+    workspaceSub: 'CF-01 활성 · 교착 상태 감지 · AI 중재 진행 중',
+    aiMediation: 'AI 중재',
+    live: '실시간',
+    addComment: '의견 추가…',
+    cfTitle: '마운팅 포인트 공차',
+    cfHeader: 'CF-01 · 활성 충돌',
+    cfMeta: 'HW-229 · 모듈 A · 이해관계자 3명',
+    positions: '포지션',
+    posEngineer: '±0.5mm 공차 허용',
+    posDesigner: '±0.3mm 공차 요구',
+    valueMatrix: '가치 충돌 매트릭스',
+    optionCLabel: 'Option C — AI 제안',
+    optionCNew: '신규',
+    optionCTitle: '적응형 개스킷 시스템',
+    optionCDesc: '가변 경도 개스킷(Shore A 45–62)이 ±0.5mm 편차를 흡수하면서 ±0.3mm 구조 사양 충족. EV-EN 모듈 B에서 검증됨.',
+    metaLeadTime: '리드타임', metaRisk: '리스크 감소', metaConf: '신뢰도',
+    approveBtn: 'Option C 승인',
+    rejectBtn: '제안 거부',
+    radarCost: '비용', radarPerf: '성능', radarDura: '내구성', radarMfg: '제조성', radarTime: '일정', radarSafe: '안전성',
+    chatSys1: '스프린트 #14 · CF-01 활성화됨. 이해관계자 3명 배정.',
+    chatDeadlock: '교착 상태 감지 — 3회 교환 후 입장 변화 없음. AI 중재 시작.',
+    chatMsg1: '열 간격을 검토했습니다. 최대 ±0.3mm가 필요합니다 — 그 이상이면 마운팅 포인트에서 진동 피로 위험이 있습니다.',
+    chatMsg2: '저번 사이클에서 양쪽 극단을 테스트했습니다. ±0.5mm는 실제로 필요한 제조 유연성을 제공합니다. ±0.3은 생산 준비에 2주를 추가합니다.',
+    chatMsg3: '받아들일 수 없습니다. 구조 사양은 ±0.3을 요구하며, 그렇지 않으면 보증이 무효화됩니다.',
+    chatAI1: '두 포지션을 분석하여 일정 제약과 보증 준수 사이의 구조적 충돌을 확인했습니다. 3개의 유사 프로젝트 재료 과학 데이터를 바탕으로 Option C — 적응형 공차 솔루션을 제안합니다.',
+    chatOptionC: 'Option C: 적응형 개스킷 시스템 — 가변 경도 개스킷 화합물(Shore A 45–62)이 ±0.5mm 편차를 흡수하면서 ±0.3mm 강성 사양과 동등한 구조적 무결성을 유지합니다. EV-EN 모듈 B에서 검증됨. 2주가 아닌 3일 추가.',
+    optionCProposed: 'Option C 제안됨',
+    consensusTitle: '합의 완료',
+    consensusSub: '모든 이해관계자가 Option C 승인 · 스프린트 #14',
+    decisionRecord: '의사결정 기록 · CF-01',
+    drConflict: '충돌',
+    drResolution: '해결안',
+    drOutcome: '결과',
+    drApprovals: '승인자',
+    drConflictVal: 'CF-01 · 마운팅 포인트 공차 — EV 열 모듈 A',
+    drResolutionVal: 'Option C: 적응형 개스킷 시스템 (Shore A 45–62 가변 화합물)',
+    drOutcomeVal: '±0.3mm 강성 사양과 동등한 구조적 무결성. 리드타임: 재설계 14일 대비 +3일.',
+    drApprovalsVal: 'Lee Sungmin (엔지니어) · Andrew Kim (디자이너) · Kim Jiyeon (리드 유저)',
+    exportBtn: '의사결정 기록 내보내기',
+    backSprint: '스프린트로 돌아가기',
+    consensusOutput: '합의 결과',
+    consensusOutputSub: '스프린트 #14 · 의사결정 기록',
+  },
+
+  zh: {
+    platformName: 'Co-Create AI',
+    platformSub: '决策冲刺平台',
+    langEn: 'EN', langKo: '한', langZh: '中',
+    loginHeading: '选择您的角色以继续',
+    loginSub: '您的角色决定了您在此次冲刺中的权限和决策权重。',
+    enterBtn: '进入决策冲刺',
+    loginFooter: '冲刺 #14 · EV 热模块 A · 12名利益相关者在线',
+    roleEngineer: '硬件工程师',
+    roleEngineerSub: '结构与热分析',
+    roleDesigner: '产品设计师',
+    roleDesignerSub: '外形与UX需求',
+    roleLead: '主要用户',
+    roleLeadSub: '现场需求与验证',
+    navHub: '项目中心',
+    navSprints: '决策冲刺',
+    navConflicts: '冲突管理',
+    navTimeline: '冲刺时间轴',
+    navStakeholders: '利益相关者',
+    navReports: '报告',
+    navSettings: '设置',
+    navHelp: '帮助文档',
+    activeSprint: '活跃冲刺',
+    conflictsOpen: '个冲突进行中',
+    back: '返回',
+    liveSession: '实时会话',
+    statusActive: '进行中',
+    statusConflict: '冲突',
+    statusResolved: '已解决',
+    statusPending: '待处理',
+    statusDeadlock: '僵局',
+    statusInProgress: '进行中',
+    hubTitle: '项目中心',
+    hubWelcome: '欢迎回来',
+    kpiActiveProjects: '活跃项目',
+    kpiActiveProjectsSub: '组织内共4个',
+    kpiOpenConflicts: '未解决冲突',
+    kpiOpenConflictsSub: '↑ 本周增加2个',
+    kpiConsensus: '平均共识率',
+    kpiConsensusSub: '目标 ≥ 80%',
+    kpiSprints: '决策冲刺',
+    kpiSprintsSub: '累计总数',
+    projects: '项目',
+    newProject: '新建项目',
+    conflicts: '冲突',
+    consensus: '共识率',
+    progress: '进度',
+    risk: '风险',
+    updated: '更新于',
+    riskHigh: '高', riskMedium: '中', riskLow: '低',
+    timelineTitle: '冲刺时间轴',
+    timelineSub: 'EV 热模块 A · 冲刺历史',
+    timelineHistory: '决策冲刺历史 · EV 热模块 A',
+    openSprint: '打开冲刺',
+    rejectionReason: '拒绝原因：',
+    consensusLabel: '共识率',
+    ev1title: '模块A热分析评审',
+    ev1desc: '安装公差问题导致工程师与设计师僵局。AI提出Option C：可变公差自适应垫圈。',
+    ev2title: '模块B外壳检查',
+    ev2desc: '通过AI调解解决壁厚冲突。达成2.0mm加强角落方案共识。',
+    ev3title: 'PCB布局冲刺',
+    ev3desc: '连接器J4位置已解决。热验证后采用方案A（左移4mm）。',
+    ev4title: '框架安装系统',
+    ev4desc: 'V1被拒绝——45°C时热间隙不足。V2添加3mm垫片后重新提交。',
+    ev4reject: '运行温度下热间隙低于规格',
+    ev5title: '冷却回路布局',
+    ev5desc: '冲刺周期内解决全部5个冲突。创下最高共识率记录。',
+    workspaceTitle: '冲刺 #14 — EV 热模块 A',
+    workspaceSub: 'CF-01 活跃 · 检测到僵局 · AI调解进行中',
+    aiMediation: 'AI 调解',
+    live: '实时',
+    addComment: '添加评论…',
+    cfTitle: '安装点公差',
+    cfHeader: 'CF-01 · 活跃冲突',
+    cfMeta: 'HW-229 · 模块A · 3名利益相关者',
+    positions: '立场',
+    posEngineer: '接受 ±0.5mm 公差',
+    posDesigner: '要求 ±0.3mm 公差',
+    valueMatrix: '价值冲突矩阵',
+    optionCLabel: 'Option C — AI 提案',
+    optionCNew: '新',
+    optionCTitle: '自适应垫圈系统',
+    optionCDesc: '可变硬度垫圈（Shore A 45–62）吸收 ±0.5mm 偏差，同时满足 ±0.3mm 结构规格。已在EV-EN模块B中验证。',
+    metaLeadTime: '交货期', metaRisk: '风险降低', metaConf: '置信度',
+    approveBtn: '批准 Option C',
+    rejectBtn: '拒绝提案',
+    radarCost: '成本', radarPerf: '性能', radarDura: '耐久性', radarMfg: '可制造性', radarTime: '工期', radarSafe: '安全性',
+    chatSys1: '冲刺 #14 · CF-01 已激活。已分配3名利益相关者。',
+    chatDeadlock: '检测到僵局——3次交换后立场未变。启动AI调解。',
+    chatMsg1: '我检查了热间隙。我们需要最大 ±0.3mm——超过这个值会有安装点振动疲劳风险。',
+    chatMsg2: '上个周期我们测试了两个极端。±0.5mm 提供了我们实际需要的制造灵活性。±0.3 会在生产准备上增加2周时间。',
+    chatMsg3: '这不可接受。结构规格要求 ±0.3，否则保修无效。',
+    chatAI1: '我分析了双方立场，识别出工期约束与保修合规之间的结构性冲突。基于3个同类项目的材料科学数据，我提出 Option C——自适应公差解决方案。',
+    chatOptionC: 'Option C：自适应垫圈系统——可变硬度垫圈化合物（Shore A 45–62）吸收 ±0.5mm 偏差，同时维持等同于 ±0.3mm 刚性规格的结构完整性。已在EV-EN模块B中验证。增加3天，而非2周。',
+    optionCProposed: 'Option C 已提出',
+    consensusTitle: '达成共识',
+    consensusSub: '所有利益相关者批准 Option C · 冲刺 #14',
+    decisionRecord: '决策记录 · CF-01',
+    drConflict: '冲突',
+    drResolution: '解决方案',
+    drOutcome: '结果',
+    drApprovals: '批准人',
+    drConflictVal: 'CF-01 · 安装点公差 — EV 热模块 A',
+    drResolutionVal: 'Option C：自适应垫圈系统（Shore A 45–62 可变化合物）',
+    drOutcomeVal: '结构完整性等同于 ±0.3mm 刚性规格。交货期：比重新设计的14天仅增加3天。',
+    drApprovalsVal: 'Lee Sungmin（工程师）· Andrew Kim（设计师）· Kim Jiyeon（主要用户）',
+    exportBtn: '导出决策记录',
+    backSprint: '返回冲刺',
+    consensusOutput: '共识结果',
+    consensusOutputSub: '冲刺 #14 · 决策记录',
+  },
+};
+
+const t = (lang, key) => TRANSLATIONS[lang]?.[key] ?? TRANSLATIONS.en[key] ?? key;
+
+// ─── LANGUAGE SWITCHER ───────────────────────────────────────
+const LangSwitcher = ({ lang, setLang }) => (
+  <div style={{ display: 'flex', gap: 2, background: C.subtle, borderRadius: 5, padding: 2, border: `1px solid ${C.border}` }}>
+    {[['en','EN'],['ko','한'],['zh','中']].map(([code, label]) => {
+      const active = lang === code;
+      return (
+        <button key={code} onClick={() => setLang(code)}
+          style={{ fontSize: 11, fontWeight: active ? 600 : 500, padding: '3px 9px', borderRadius: 3,
+            background: active ? C.white : 'transparent',
+            color: active ? C.fg1 : C.fg3,
+            border: active ? `1px solid ${C.border}` : '1px solid transparent',
+            boxShadow: active ? '0 1px 2px rgba(30,42,53,0.08)' : 'none',
+            transition: 'all 140ms', cursor: 'pointer', lineHeight: 1.4,
+            fontFamily: 'Inter, system-ui, sans-serif' }}>
+          {label}
+        </button>
+      );
+    })}
+  </div>
+);
+
+// ─── ICON HELPER ─────────────────────────────────────────────
+const Icon = ({ name, size = 16, color, style = {} }) => {
+  const ref = useRef(null);
+  useEffect(() => {
+    if (ref.current && window.lucide) {
+      ref.current.innerHTML = '';
+      const el = document.createElement('i');
+      el.setAttribute('data-lucide', name);
+      ref.current.appendChild(el);
+      window.lucide.createIcons({ nodes: [el] });
+      const svg = ref.current.querySelector('svg');
+      if (svg) {
+        svg.style.width = size + 'px';
+        svg.style.height = size + 'px';
+        if (color) svg.style.color = color;
+      }
+    }
+  }, [name, size, color]);
+  return <span ref={ref} style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0, ...style }} />;
+};
+
+// ─── SIDEBAR ─────────────────────────────────────────────────
+// Sidebar and SideNavItem now live in src/components/Sidebar.jsx
+// (loaded above as a separate <script type="text/babel" src="...">).
+// They are rendered below as <Sidebar /> inside <App />.
+
+// ─── TOPBAR ──────────────────────────────────────────────────
+const Topbar = ({ title, subtitle, status, action, actionLabel, onBack, lang, setLang }) => {
+  const l = lang || 'en';
+  return (
+    <div style={{ height: 52, flexShrink: 0, background: C.white, borderBottom: `1px solid ${C.borderSubtle}`, display: 'flex', alignItems: 'center', padding: '0 16px', gap: 10 }}>
+      {onBack && (
+        <button onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, color: C.fg3, background: 'none', border: 'none', padding: '4px 8px', borderRadius: 4, cursor: 'pointer' }}>
+          <Icon name="chevron-left" size={14} /> {t(l,'back')}
+        </button>
+      )}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 14, fontWeight: 600, color: C.fg1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</span>
+          {status && <StatusBadge status={status} lang={l} />}
+        </div>
+        {subtitle && <div style={{ fontSize: 11, color: C.fg3, marginTop: 1 }}>{subtitle}</div>}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ fontSize: 11, color: C.fg3, display: 'flex', alignItems: 'center', gap: 5 }}>
+          <div style={{ width: 6, height: 6, borderRadius: '50%', background: C.emerald, animation: 'pulse-dot 2s infinite' }}></div>
+          {t(l,'liveSession')}
+        </div>
+        {action && <Btn variant="primary" size="sm" onClick={action}>{actionLabel}</Btn>}
+        {setLang && <LangSwitcher lang={l} setLang={setLang} />}
+      </div>
+    </div>
+  );
+};
+
+const StatusBadge = ({ status, lang = 'en' }) => {
+  const labels = {
+    active:   t(lang,'statusActive'),
+    conflict: t(lang,'statusConflict'),
+    resolved: t(lang,'statusResolved'),
+    pending:  t(lang,'statusPending'),
+    deadlock: t(lang,'statusDeadlock'),
+  };
+  const styles = {
+    active:   { bg: C.emeraldLight, color: C.emerald, border: C.emeraldBorder },
+    conflict: { bg: C.coralLight,   color: C.coral,   border: C.coralBorder },
+    resolved: { bg: C.emeraldLight, color: C.emerald, border: C.emeraldBorder },
+    pending:  { bg: C.amberLight,   color: C.amber,   border: '#FEF0CC' },
+    deadlock: { bg: C.coralLight,   color: C.coral,   border: C.coralBorder },
+  };
+  const s = styles[status] || styles.pending;
+  return <span style={{ fontSize: 10, fontWeight: 500, padding: '2px 7px', borderRadius: 9999, background: s.bg, color: s.color, border: `1px solid ${s.border}`, whiteSpace: 'nowrap' }}>{labels[status] || status}</span>;
+};
+
+const Btn = ({ children, variant = 'default', size = 'md', onClick, disabled, style = {} }) => {
+  const [hov, setHov] = useState(false);
+  const [press, setPress] = useState(false);
+  const variants = {
+    primary: { bg: hov ? C.emeraldHover : C.emerald, color: '#fff', border: 'none' },
+    danger:  { bg: hov ? C.coralHover   : C.coral,   color: '#fff', border: 'none' },
+    ghost:   { bg: hov ? C.muted : 'transparent', color: C.fg2, border: `1px solid ${hov ? C.border : 'transparent'}` },
+    default: { bg: hov ? C.subtle : C.white, color: C.fg2, border: `1px solid ${C.border}` },
+  };
+  const sizes = {
+    sm: { fontSize: 11, padding: '5px 11px' },
+    md: { fontSize: 13, padding: '7px 14px' },
+    lg: { fontSize: 14, padding: '10px 20px', fontWeight: 600 },
+  };
+  const v = variants[variant]; const s = sizes[size];
+  return (
+    <button onClick={onClick} disabled={disabled}
+      onMouseEnter={() => setHov(true)} onMouseLeave={() => { setHov(false); setPress(false); }}
+      onMouseDown={() => setPress(true)} onMouseUp={() => setPress(false)}
+      style={{ ...s, background: v.bg, color: v.color, border: v.border, borderRadius: 4, fontWeight: 500,
+        fontFamily: 'Inter, system-ui, sans-serif', cursor: disabled ? 'default' : 'pointer',
+        transition: 'background 120ms, box-shadow 120ms', transform: press ? 'scale(0.985)' : 'scale(1)',
+        opacity: disabled ? 0.5 : 1, display: 'inline-flex', alignItems: 'center', gap: 6, ...style }}>
+      {children}
+    </button>
+  );
+};
+
+// ─── LOGIN ───────────────────────────────────────────────────
+const LoginScreen = ({ onLogin, lang, setLang }) => {
+  const [selected, setSelected] = useState(null);
+  const [hov, setHov] = useState(null);
+  const roles = [
+    { id: 'engineer', label: t(lang,'roleEngineer'), sub: t(lang,'roleEngineerSub'), icon: 'cpu',        color: C.emerald },
+    { id: 'designer', label: t(lang,'roleDesigner'), sub: t(lang,'roleDesignerSub'), icon: 'pen-tool',   color: '#3A6EA5' },
+    { id: 'lead',     label: t(lang,'roleLead'),     sub: t(lang,'roleLeadSub'),     icon: 'user-check', color: C.amber },
+  ];
+  return (
+    <div style={{ height: '100vh', background: 'linear-gradient(135deg,#F4F6F8 0%,#FAFBFC 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
+      {/* Lang switcher top-right */}
+      <div style={{ position: 'absolute', top: 20, right: 24 }}>
+        <LangSwitcher lang={lang} setLang={setLang} />
+      </div>
+
+      <div className="fade-in" style={{ width: 480, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 32 }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 28, fontWeight: 700, color: C.fg1, letterSpacing: '-0.025em' }}>{t(lang,'platformName')}</div>
+          <div style={{ fontSize: 13, color: C.fg3, marginTop: 4 }}>{t(lang,'platformSub')}</div>
+        </div>
+
+        <div style={{ width: '100%', background: C.white, borderRadius: 8, border: `1px solid ${C.border}`, boxShadow: '0 4px 24px rgba(30,42,53,0.08)', padding: 32 }}>
+          <div style={{ fontSize: 15, fontWeight: 600, color: C.fg1, marginBottom: 6 }}>{t(lang,'loginHeading')}</div>
+          <div style={{ fontSize: 13, color: C.fg3, marginBottom: 24 }}>{t(lang,'loginSub')}</div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {roles.map(r => (
+              <div key={r.id} onClick={() => setSelected(r.id)}
+                onMouseEnter={() => setHov(r.id)} onMouseLeave={() => setHov(null)}
+                style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px', borderRadius: 6, cursor: 'pointer',
+                  border: selected === r.id ? `2px solid ${r.color}` : `2px solid ${hov === r.id ? C.border : C.borderSubtle}`,
+                  background: selected === r.id ? `${r.color}08` : hov === r.id ? C.subtle : C.white,
+                  transition: 'all 150ms', boxShadow: selected === r.id ? `0 0 0 3px ${r.color}20` : 'none' }}>
+                <div style={{ width: 38, height: 38, borderRadius: 6, background: `${r.color}15`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <Icon name={r.icon} size={18} color={r.color} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: C.fg1 }}>{r.label}</div>
+                  <div style={{ fontSize: 11, color: C.fg3, marginTop: 2 }}>{r.sub}</div>
+                </div>
+                <div style={{ width: 18, height: 18, borderRadius: '50%', border: `2px solid ${selected === r.id ? r.color : C.border}`, background: selected === r.id ? r.color : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 150ms' }}>
+                  {selected === r.id && <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#fff' }}></div>}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <Btn variant="primary" size="lg" disabled={!selected} onClick={() => selected && onLogin(selected)}
+            style={{ width: '100%', marginTop: 24, justifyContent: 'center' }}>
+            {t(lang,'enterBtn')} <Icon name="arrow-right" size={15} />
+          </Btn>
+        </div>
+
+        <div style={{ fontSize: 11, color: C.fg4 }}>{t(lang,'loginFooter')}</div>
+      </div>
+    </div>
+  );
+};
+
+// ─── PROJECT HUB ─────────────────────────────────────────────
+const HubScreen = ({ onOpen }) => {
+  const lang = useLang();
+  const projects = [
+    { id: 'EV-TH', name: 'EV Thermal Module A', team: 'Hardware Core',    status: 'active',   conflicts: 3, consensus: 67, sprint: 14, progress: 67,  risk: 'high',   updated: '2 min ago' },
+    { id: 'EV-EN', name: 'EV Enclosure Design', team: 'Industrial Design', status: 'pending',  conflicts: 1, consensus: 82, sprint: 9,  progress: 44,  risk: 'medium', updated: '1h ago' },
+    { id: 'PCB-A', name: 'PCB Layout Rev. 3',   team: 'Electronics',       status: 'resolved', conflicts: 0, consensus: 94, sprint: 7,  progress: 100, risk: 'low',    updated: '3h ago' },
+    { id: 'FM-02', name: 'Frame Mounting System',team: 'Structural',        status: 'pending',  conflicts: 2, consensus: 55, sprint: 11, progress: 30,  risk: 'high',   updated: 'Yesterday' },
+    { id: 'BMS-1', name: 'BMS Integration',      team: 'Electronics',       status: 'active',   conflicts: 1, consensus: 78, sprint: 6,  progress: 80,  risk: 'medium', updated: '5h ago' },
+    { id: 'COOL', name: 'Cooling Loop Routing',  team: 'Thermal',           status: 'resolved', conflicts: 0, consensus: 91, sprint: 5,  progress: 100, risk: 'low',    updated: '2 days ago' },
+  ];
+  const riskColor = { high: C.coral, medium: C.amber, low: C.emerald };
+  const riskLabel = { high: t(lang,'riskHigh'), medium: t(lang,'riskMedium'), low: t(lang,'riskLow') };
+
+  return (
+    <div style={{ flex: 1, overflow: 'auto', padding: 24, display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12 }}>
+        {[
+          { label: t(lang,'kpiActiveProjects'), value: '2',  sub: t(lang,'kpiActiveProjectsSub'), color: C.fg1 },
+          { label: t(lang,'kpiOpenConflicts'),  value: '7',  sub: t(lang,'kpiOpenConflictsSub'),  color: C.coral },
+          { label: t(lang,'kpiConsensus'),      value: '78%',sub: t(lang,'kpiConsensusSub'),      color: C.emerald },
+          { label: t(lang,'kpiSprints'),        value: '52', sub: t(lang,'kpiSprintsSub'),        color: C.fg1 },
+        ].map(s => (
+          <div key={s.label} style={{ background: C.white, border: `1px solid ${C.borderSubtle}`, borderRadius: 6, padding: '14px 16px', boxShadow: '0 1px 2px rgba(30,42,53,0.06)' }}>
+            <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', color: C.fg3, marginBottom: 4 }}>{s.label}</div>
+            <div style={{ fontSize: 28, fontWeight: 700, color: s.color, lineHeight: 1 }}>{s.value}</div>
+            <div style={{ fontSize: 11, color: C.fg3, marginTop: 4 }}>{s.sub}</div>
+          </div>
+        ))}
+      </div>
+
+      <div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+          <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', color: C.fg3 }}>{t(lang,'projects')}</div>
+          <Btn variant="primary" size="sm"><Icon name="plus" size={13} /> {t(lang,'newProject')}</Btn>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12 }}>
+          {projects.map(p => <ProjectCard key={p.id} project={p} onOpen={onOpen} riskColor={riskColor} riskLabel={riskLabel} />)}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const ProjectCard = ({ project: p, onOpen, riskColor, riskLabel }) => {
+  const lang = useLang();
+  const [hov, setHov] = useState(false);
+  return (
+    <div onClick={() => onOpen(p)} onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
+      style={{ background: C.white, border: `1px solid ${hov ? C.border : C.borderSubtle}`, borderRadius: 6,
+        boxShadow: hov ? '0 4px 12px rgba(30,42,53,0.10)' : '0 1px 3px rgba(30,42,53,0.07)',
+        cursor: 'pointer', transition: 'all 160ms', overflow: 'hidden' }}>
+      <div style={{ height: 3, background: p.status === 'active' ? C.emerald : p.status === 'pending' ? C.amber : C.fg4 }}></div>
+      <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: C.fg1 }}>{p.name}</div>
+            <div style={{ fontSize: 11, color: C.fg3, marginTop: 2 }}>{p.team} · Sprint #{p.sprint}</div>
+          </div>
+          <StatusBadge status={p.status} lang={lang} />
+        </div>
+        <div style={{ background: C.subtle, borderRadius: 4, padding: '8px 10px', display: 'flex', gap: 16 }}>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: p.conflicts > 0 ? C.coral : C.emerald }}>{p.conflicts}</div>
+            <div style={{ fontSize: 10, color: C.fg3 }}>{t(lang,'conflicts')}</div>
+          </div>
+          <div style={{ width: 1, background: C.border }}></div>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: C.emerald }}>{p.consensus}%</div>
+            <div style={{ fontSize: 10, color: C.fg3 }}>{t(lang,'consensus')}</div>
+          </div>
+          <div style={{ width: 1, background: C.border }}></div>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+              <span style={{ fontSize: 10, color: C.fg3 }}>{t(lang,'progress')}</span>
+              <span style={{ fontSize: 10, fontWeight: 600, color: C.fg2 }}>{p.progress}%</span>
+            </div>
+            <div style={{ height: 4, background: C.muted, borderRadius: 2 }}>
+              <div style={{ height: 4, background: C.emerald, borderRadius: 2, width: `${p.progress}%`, transition: 'width 300ms' }}></div>
+            </div>
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <div style={{ width: 6, height: 6, borderRadius: '50%', background: riskColor[p.risk] }}></div>
+            <span style={{ fontSize: 10, color: C.fg3 }}>{riskLabel[p.risk]} {t(lang,'risk')}</span>
+          </div>
+          <span style={{ fontSize: 10, color: C.fg4 }}>{t(lang,'updated')} {p.updated}</span>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ─── SPRINT TIMELINE ─────────────────────────────────────────
+const TimelineScreen = ({ onOpenSprint }) => {
+  const lang = useLang();
+  const events = [
+    { id: 1, sprint: 14, date: 'Apr 24, 2026', title: t(lang,'ev1title'), desc: t(lang,'ev1desc'), consensus: null,  outcome: 'in_progress' },
+    { id: 2, sprint: 13, date: 'Apr 21, 2026', title: t(lang,'ev2title'), desc: t(lang,'ev2desc'), consensus: 89,    outcome: 'approved', drawing: 'V3' },
+    { id: 3, sprint: 12, date: 'Apr 18, 2026', title: t(lang,'ev3title'), desc: t(lang,'ev3desc'), consensus: 94,    outcome: 'approved', drawing: 'V2' },
+    { id: 4, sprint: 11, date: 'Apr 12, 2026', title: t(lang,'ev4title'), desc: t(lang,'ev4desc'), consensus: 71,    outcome: 'rejected', drawing: 'V1', rejectedReason: t(lang,'ev4reject') },
+    { id: 5, sprint: 10, date: 'Apr 08, 2026', title: t(lang,'ev5title'), desc: t(lang,'ev5desc'), consensus: 97,    outcome: 'approved', drawing: 'V2' },
+  ];
+  const outcomeStyle = {
+    in_progress: { color: C.amber,   icon: 'loader' },
+    approved:    { color: C.emerald, icon: 'check-circle' },
+    rejected:    { color: C.coral,   icon: 'x-circle' },
+  };
+  return (
+    <div style={{ flex: 1, overflow: 'auto', padding: '24px 40px' }}>
+      <div style={{ maxWidth: 700, margin: '0 auto' }}>
+        <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', color: C.fg3, marginBottom: 20 }}>{t(lang,'timelineHistory')}</div>
+        <div style={{ position: 'relative', paddingLeft: 32 }}>
+          <div style={{ position: 'absolute', left: 9, top: 0, bottom: 0, width: 2, background: C.borderSubtle }}></div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+            {events.map((ev, i) => {
+              const o = outcomeStyle[ev.outcome];
+              const isActive = ev.outcome === 'in_progress';
+              return (
+                <div key={ev.id} style={{ position: 'relative', paddingBottom: i < events.length - 1 ? 24 : 0 }}>
+                  <div style={{ position: 'absolute', left: -32, top: 16, width: 20, height: 20, borderRadius: '50%',
+                    background: isActive ? C.emerald : ev.outcome === 'approved' ? C.emeraldLight : C.coralLight,
+                    border: `2px solid ${isActive ? C.emerald : ev.outcome === 'approved' ? C.emerald : C.coral}`,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    boxShadow: isActive ? '0 0 0 4px rgba(30,138,90,0.15)' : 'none',
+                    animation: isActive ? 'pulse-dot 2s infinite' : 'none' }}>
+                    <Icon name={o.icon} size={10} color={isActive ? '#fff' : o.color} />
+                  </div>
+                  <div onClick={() => isActive && onOpenSprint()}
+                    style={{ background: C.white, border: `1px solid ${isActive ? C.emerald : C.borderSubtle}`, borderRadius: 6,
+                      boxShadow: isActive ? '0 0 0 3px rgba(30,138,90,0.1), 0 2px 8px rgba(30,42,53,0.08)' : '0 1px 3px rgba(30,42,53,0.06)',
+                      cursor: isActive ? 'pointer' : 'default' }}>
+                    <div style={{ padding: '12px 16px', display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                          <span style={{ fontSize: 10, fontFamily: 'monospace', color: C.fg3, fontWeight: 600 }}>Sprint #{ev.sprint}</span>
+                          <span style={{ fontSize: 10, color: C.fg4 }}>·</span>
+                          <span style={{ fontSize: 10, color: C.fg4 }}>{ev.date}</span>
+                          <StatusBadge status={isActive ? 'active' : ev.outcome === 'approved' ? 'resolved' : 'conflict'} lang={lang} />
+                        </div>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: C.fg1, marginBottom: 4 }}>{ev.title}</div>
+                        <div style={{ fontSize: 12, color: C.fg3, lineHeight: 1.55 }}>{ev.desc}</div>
+                        {ev.rejectedReason && (
+                          <div style={{ marginTop: 8, padding: '6px 10px', background: C.coralLight, borderRadius: 4, borderLeft: `3px solid ${C.coral}`, fontSize: 11, color: C.coral }}>
+                            {t(lang,'rejectionReason')} {ev.rejectedReason}
+                          </div>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, flexShrink: 0 }}>
+                        {ev.drawing && <span style={{ fontSize: 10, fontFamily: 'monospace', fontWeight: 600, padding: '2px 7px', borderRadius: 3, background: C.subtle, color: C.fg2, border: `1px solid ${C.border}` }}>{ev.drawing}</span>}
+                        {ev.consensus && <div style={{ textAlign: 'right' }}>
+                          <div style={{ fontSize: 16, fontWeight: 700, color: C.emerald }}>{ev.consensus}%</div>
+                          <div style={{ fontSize: 10, color: C.fg3 }}>{t(lang,'consensusLabel')}</div>
+                        </div>}
+                        {isActive && <Btn variant="primary" size="sm"><Icon name="arrow-right" size={12} /> {t(lang,'openSprint')}</Btn>}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ─── BLUEPRINT VIEWER ────────────────────────────────────────
+const BlueprintViewer = ({ activePin, onPinClick }) => {
+  const lang = useLang();
+  const pins = [
+    { id: 1, label: 'CF-01', status: 'conflict', title: t(lang,'cfTitle') },
+    { id: 2, label: 'CF-02', status: 'pending',  title: 'PCB connector J4' },
+    { id: 3, label: 'CF-03', status: 'conflict', title: lang === 'ko' ? '벽 두께' : lang === 'zh' ? '壁厚' : 'Wall thickness' },
+  ];
+  return (
+    <div style={{ flex: 1, background: '#F8FAFC', position: 'relative', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}>
+        <defs>
+          <pattern id="smallGrid" width="20" height="20" patternUnits="userSpaceOnUse">
+            <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#E2E8ED" strokeWidth="0.5"/>
+          </pattern>
+          <pattern id="grid" width="100" height="100" patternUnits="userSpaceOnUse">
+            <rect width="100" height="100" fill="url(#smallGrid)"/>
+            <path d="M 100 0 L 0 0 0 100" fill="none" stroke="#C5D0D9" strokeWidth="0.8"/>
+          </pattern>
+        </defs>
+        <rect width="100%" height="100%" fill="url(#grid)"/>
+      </svg>
+      <div style={{ position: 'relative' }}>
+        <svg width="460" height="340" viewBox="0 0 460 340" style={{ filter: 'drop-shadow(0 8px 32px rgba(30,42,53,0.12))' }}>
+          <rect x="30" y="30" width="400" height="280" rx="4" fill="white" stroke="#3A4A58" strokeWidth="2"/>
+          <rect x="55" y="55" width="350" height="230" rx="2" fill="none" stroke="#62788A" strokeWidth="1" strokeDasharray="6,3"/>
+          <rect x="70" y="70" width="200" height="140" fill="#EDF7F2" stroke="#1E8A5A" strokeWidth="1.5"/>
+          <text x="170" y="145" textAnchor="middle" style={{ fontSize: 9, fill: '#1E8A5A', fontFamily: 'monospace', fontWeight: 600 }}>PCB-A · Rev.3</text>
+          <rect x="255" y="78" width="28" height="14" rx="2" fill="#FEF0CC" stroke="#C88A1A" strokeWidth="1"/>
+          <text x="269" y="87" textAnchor="middle" style={{ fontSize: 7, fill: '#7A5500', fontFamily: 'monospace', fontWeight: 600 }}>J4</text>
+          {[0,1,2,3,4,5].map(i => <rect key={i} x={300 + i * 14} y="70" width="8" height="140" fill="#EAF0F5" stroke="#9BAAB7" strokeWidth="0.8"/>)}
+          <text x="385" y="145" textAnchor="middle" style={{ fontSize: 8, fill: '#62788A', fontFamily: 'monospace' }}>COOLING</text>
+          {[[68,68],[270,68],[68,208],[270,208]].map(([cx,cy],i) => (
+            <circle key={i} cx={cx} cy={cy} r="5" fill="white" stroke={i===0 ? C.coral : '#3A4A58'} strokeWidth={i===0 ? 2 : 1.5}/>
+          ))}
+          <rect x="130" y="170" width="60" height="36" rx="2" fill="#EDF7F2" stroke="#1E8A5A" strokeWidth="1"/>
+          <text x="160" y="192" textAnchor="middle" style={{ fontSize: 8, fill: '#1E8A5A', fontFamily: 'monospace' }}>THERMAL</text>
+          <line x1="70" y1="240" x2="270" y2="240" stroke="#9BAAB7" strokeWidth="0.8" strokeDasharray="4,2"/>
+          <text x="170" y="254" textAnchor="middle" style={{ fontSize: 8, fill: '#9BAAB7', fontFamily: 'monospace' }}>200mm</text>
+          <line x1="290" y1="70" x2="290" y2="210" stroke="#9BAAB7" strokeWidth="0.8" strokeDasharray="4,2"/>
+          <text x="302" y="143" style={{ fontSize: 8, fill: '#9BAAB7', fontFamily: 'monospace' }}>140mm</text>
+          <line x1="68" y1="68" x2="100" y2="40" stroke={C.coral} strokeWidth="1" strokeDasharray="3,2"/>
+          <rect x="100" y="24" width="96" height="20" rx="2" fill={C.coralLight} stroke={C.coralBorder} strokeWidth="1"/>
+          <text x="148" y="37" textAnchor="middle" style={{ fontSize: 8.5, fill: C.coral, fontFamily: 'monospace', fontWeight: 600 }}>±0.3mm — CONFLICT</text>
+        </svg>
+        {pins.map(pin => <PulsePin key={pin.id} pin={pin} active={activePin === pin.id} onClick={() => onPinClick(pin.id)} />)}
+      </div>
+      <div style={{ position: 'absolute', bottom: 16, right: 16, display: 'flex', gap: 4 }}>
+        {['zoom-in','zoom-out','maximize-2','layers'].map(icon => (
+          <button key={icon} style={{ width: 30, height: 30, borderRadius: 4, background: C.white, border: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 1px 3px rgba(30,42,53,0.08)' }}>
+            <Icon name={icon} size={13} color={C.fg3} />
+          </button>
+        ))}
+      </div>
+      <div style={{ position: 'absolute', bottom: 18, left: 16, fontSize: 10, color: C.fg3, fontFamily: 'monospace', display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div style={{ width: 40, height: 2, background: C.fg3 }}></div> 20mm
+      </div>
+    </div>
+  );
+};
+
+const PulsePin = ({ pin, active, onClick }) => {
+  const [hov, setHov] = useState(false);
+  const isConflict = pin.status === 'conflict';
+  const color = isConflict ? C.coral : C.amber;
+  const posMap = { 1: { top: 135, left: 120 }, 2: { top: 71, left: 230 }, 3: { top: 208, left: 174 } };
+  const pos = posMap[pin.id];
+  return (
+    <div onClick={onClick} onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
+      style={{ position: 'absolute', top: pos.top, left: pos.left, cursor: 'pointer', zIndex: 10 }}>
+      <div style={{ width: 24, height: 24, borderRadius: '50%', background: color, border: '2px solid white',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, color: '#fff',
+        animation: isConflict ? 'pulse-ring 2s ease-out infinite' : 'none',
+        boxShadow: `0 2px 8px ${color}60`, transition: 'transform 120ms',
+        transform: (hov || active) ? 'scale(1.2)' : 'scale(1)' }}>
+        {pin.id}
+      </div>
+      {(hov || active) && (
+        <div style={{ position: 'absolute', left: 28, top: -4, background: C.fg1, color: '#fff', fontSize: 10, fontWeight: 500,
+          padding: '4px 8px', borderRadius: 4, whiteSpace: 'nowrap', boxShadow: '0 2px 8px rgba(30,42,53,0.2)', animation: 'fadeIn 0.15s ease both' }}>
+          {pin.label} · {pin.title}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ─── CHAT PANEL ──────────────────────────────────────────────
+const ChatPanel = () => {
+  const lang = useLang();
+  const [input, setInput] = useState('');
+  const scrollRef = useRef(null);
+  const messages = [
+    { type: 'system', text: t(lang,'chatSys1') },
+    { type: 'user',   name: 'Andrew Kim',  role: lang==='ko'?'디자이너':lang==='zh'?'设计师':'Designer', initials: 'AK', color: '#3A6EA5', text: t(lang,'chatMsg1') },
+    { type: 'user',   name: 'Lee Sungmin', role: lang==='ko'?'엔지니어':lang==='zh'?'工程师':'Engineer', initials: 'LS', color: C.emerald, text: t(lang,'chatMsg2') },
+    { type: 'user',   name: 'Andrew Kim',  role: lang==='ko'?'디자이너':lang==='zh'?'设计师':'Designer', initials: 'AK', color: '#3A6EA5', text: t(lang,'chatMsg3') },
+    { type: 'system', text: t(lang,'chatDeadlock') },
+    { type: 'ai',     text: t(lang,'chatAI1') },
+    { type: 'ai',     isOptionC: true, text: t(lang,'chatOptionC') },
+  ];
+  useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [lang]);
+  return (
+    <div style={{ width: 220, background: C.white, borderLeft: `1px solid ${C.borderSubtle}`, borderRight: `1px solid ${C.borderSubtle}`, display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
+      <div style={{ padding: '10px 12px', borderBottom: `1px solid ${C.borderSubtle}`, display: 'flex', alignItems: 'center', gap: 6 }}>
+        <Icon name="message-square" size={13} color={C.fg3} />
+        <span style={{ fontSize: 11, fontWeight: 600, color: C.fg2 }}>{t(lang,'aiMediation')}</span>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4 }}>
+          <div style={{ width: 6, height: 6, borderRadius: '50%', background: C.emerald, animation: 'pulse-dot 2s infinite' }}></div>
+          <span style={{ fontSize: 10, color: C.fg3 }}>{t(lang,'live')}</span>
+        </div>
+      </div>
+      <div ref={scrollRef} style={{ flex: 1, overflow: 'auto', padding: '10px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {messages.map((msg, i) => {
+          if (msg.type === 'system') return <div key={i} style={{ textAlign: 'center', fontSize: 10, color: C.fg4, padding: '2px 0' }}>{msg.text}</div>;
+          if (msg.type === 'user') return (
+            <div key={i} style={{ display: 'flex', gap: 6 }}>
+              <div style={{ width: 22, height: 22, borderRadius: 3, background: msg.color, color: '#fff', fontSize: 9, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{msg.initials}</div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 10, fontWeight: 600, color: C.fg2, marginBottom: 2 }}>{msg.name} <span style={{ fontWeight: 400, color: C.fg4 }}>· {msg.role}</span></div>
+                <div style={{ fontSize: 11, color: C.fg2, lineHeight: 1.5, background: C.subtle, padding: '6px 8px', borderRadius: '0 5px 5px 5px', border: `1px solid ${C.borderSubtle}` }}>{msg.text}</div>
+              </div>
+            </div>
+          );
+          if (msg.type === 'ai') return (
+            <div key={i} style={{ display: 'flex', gap: 6 }}>
+              <div style={{ width: 22, height: 22, borderRadius: 3, background: 'linear-gradient(135deg,#1E8A5A,#25A46C)', color: '#fff', fontSize: 9, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>AI</div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 10, fontWeight: 600, color: C.emerald, marginBottom: 2 }}>Co-Create AI</div>
+                <div style={{ fontSize: 11, color: msg.isOptionC ? C.fg1 : C.fg2, lineHeight: 1.5,
+                  background: msg.isOptionC ? C.emeraldLight : C.subtle, padding: '6px 8px', borderRadius: '0 5px 5px 5px',
+                  border: `1px solid ${msg.isOptionC ? C.emeraldBorder : C.borderSubtle}`,
+                  animation: msg.isOptionC ? 'fadeIn 0.4s ease both' : 'none' }}>
+                  {msg.isOptionC && <div style={{ fontSize: 10, fontWeight: 700, color: C.emerald, marginBottom: 3, display: 'flex', alignItems: 'center', gap: 4 }}><Icon name="sparkles" size={11} color={C.emerald} /> {t(lang,'optionCProposed')}</div>}
+                  {msg.text}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ padding: '8px 10px', borderTop: `1px solid ${C.borderSubtle}` }}>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <input value={input} onChange={e => setInput(e.target.value)} placeholder={t(lang,'addComment')}
+            style={{ flex: 1, fontSize: 11, padding: '6px 8px', borderRadius: 4, border: `1px solid ${C.border}`, outline: 'none', fontFamily: 'inherit', background: C.subtle, color: C.fg1 }} />
+          <button style={{ width: 28, height: 28, borderRadius: 4, background: C.emerald, border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+            <Icon name="send" size={12} color="#fff" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ─── RADAR CHART ─────────────────────────────────────────────
+const RadarChart = () => {
+  const lang = useLang();
+  const axes = [t(lang,'radarCost'),t(lang,'radarPerf'),t(lang,'radarDura'),t(lang,'radarMfg'),t(lang,'radarTime'),t(lang,'radarSafe')];
+  const n = axes.length, cx = 90, cy = 90, r = 65;
+  const engineer = [0.55, 0.85, 0.75, 0.95, 0.5, 0.8];
+  const designer  = [0.7,  0.7,  0.95, 0.55, 0.4, 0.9];
+  const optionC   = [0.75, 0.82, 0.88, 0.85, 0.78, 0.87];
+  const pt = (val, i) => { const a = (Math.PI*2*i/n) - Math.PI/2; return { x: cx + r*val*Math.cos(a), y: cy + r*val*Math.sin(a) }; };
+  const pts = (vals) => vals.map((v,i) => pt(v,i)).map(p => `${p.x},${p.y}`).join(' ');
+  const axisEnd = (i) => pt(1.08, i);
+  return (
+    <svg width="180" height="180" viewBox="0 0 180 180">
+      {[0.25,0.5,0.75,1].map(lvl => <polygon key={lvl} points={axes.map((_,i)=>pt(lvl,i)).map(p=>`${p.x},${p.y}`).join(' ')} fill="none" stroke="#E2E8ED" strokeWidth="0.8"/>)}
+      {axes.map((ax,i) => { const end = axisEnd(i); return <g key={ax}><line x1={cx} y1={cy} x2={end.x} y2={end.y} stroke="#C5D0D9" strokeWidth="0.8"/><text x={end.x+(end.x-cx)*0.12} y={end.y+(end.y-cy)*0.12+3} textAnchor="middle" style={{ fontSize: 8, fill: '#62788A', fontFamily: 'Inter,sans-serif' }}>{ax}</text></g>; })}
+      <polygon points={pts(engineer)} fill="rgba(62,106,165,0.10)" stroke="#3A6EA5" strokeWidth="1.5" strokeDasharray="3,2"/>
+      <polygon points={pts(designer)}  fill="rgba(208,80,69,0.08)"  stroke="#D05045" strokeWidth="1.5" strokeDasharray="3,2"/>
+      <polygon points={pts(optionC)}   fill="rgba(30,138,90,0.12)"  stroke="#1E8A5A" strokeWidth="2"/>
+      {[{color:'#3A6EA5',label:'Engineer'},{color:C.coral,label:'Designer'},{color:C.emerald,label:'Option C'}].map((l,i)=>(
+        <g key={l.label} transform={`translate(4,${155+i*9})`}><rect width="10" height="2" y="3" fill={l.color} rx="1"/><text x="14" y="8" style={{ fontSize: 8, fill: '#62788A', fontFamily: 'Inter,sans-serif' }}>{l.label}</text></g>
+      ))}
+    </svg>
+  );
+};
+
+// ─── CONFLICT PANEL ──────────────────────────────────────────
+const ConflictPanel = ({ onApprove, onReject }) => {
+  const lang = useLang();
+  const [appHov, setAppHov] = useState(false);
+  const [rejHov, setRejHov] = useState(false);
+  return (
+    <div style={{ width: 230, background: C.white, borderLeft: `1px solid ${C.borderSubtle}`, display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
+      <div style={{ padding: '10px 12px', borderBottom: `1px solid ${C.borderSubtle}` }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+          <Icon name="alert-triangle" size={13} color={C.coral} />
+          <span style={{ fontSize: 11, fontWeight: 600, color: C.fg2 }}>{t(lang,'cfHeader')}</span>
+        </div>
+        <div style={{ fontSize: 12, fontWeight: 600, color: C.fg1 }}>{t(lang,'cfTitle')}</div>
+        <div style={{ fontSize: 10, color: C.fg3, marginTop: 2 }}>{t(lang,'cfMeta')}</div>
+      </div>
+      <div style={{ flex: 1, overflow: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', color: C.fg3, marginBottom: 8 }}>{t(lang,'positions')}</div>
+          {[
+            { who: lang==='ko'?'엔지니어':lang==='zh'?'工程师':'Engineer', text: t(lang,'posEngineer'), icon: 'cpu',      color: C.emerald },
+            { who: lang==='ko'?'디자이너':lang==='zh'?'设计师':'Designer', text: t(lang,'posDesigner'), icon: 'pen-tool', color: '#3A6EA5' },
+          ].map(p => (
+            <div key={p.who} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '8px', borderRadius: 4, background: C.subtle, border: `1px solid ${C.borderSubtle}`, marginBottom: 6 }}>
+              <div style={{ width: 20, height: 20, borderRadius: 3, background: `${p.color}15`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 1 }}>
+                <Icon name={p.icon} size={11} color={p.color} />
+              </div>
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 600, color: p.color, marginBottom: 1 }}>{p.who}</div>
+                <div style={{ fontSize: 11, color: C.fg2 }}>{p.text}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', color: C.fg3, marginBottom: 4 }}>{t(lang,'valueMatrix')}</div>
+          <div style={{ display: 'flex', justifyContent: 'center' }}><RadarChart /></div>
+        </div>
+        <div style={{ borderRadius: 6, border: `2px solid ${C.emerald}`, padding: '10px 12px', background: C.emeraldLight, animation: 'option-glow 2.5s ease-in-out infinite' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+            <Icon name="sparkles" size={13} color={C.emerald} />
+            <span style={{ fontSize: 11, fontWeight: 700, color: C.emerald }}>{t(lang,'optionCLabel')}</span>
+            <span style={{ fontSize: 9, fontWeight: 600, padding: '1px 5px', borderRadius: 9999, background: C.emerald, color: '#fff', marginLeft: 'auto' }}>{t(lang,'optionCNew')}</span>
+          </div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: C.fg1, marginBottom: 4 }}>{t(lang,'optionCTitle')}</div>
+          <div style={{ fontSize: 11, color: C.fg2, lineHeight: 1.55, marginBottom: 8 }}>{t(lang,'optionCDesc')}</div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {[
+              { label: t(lang,'metaLeadTime'), value: '+3d',  good: false },
+              { label: t(lang,'metaRisk'),     value: '−72%', good: true },
+              { label: t(lang,'metaConf'),     value: '91%',  good: true },
+            ].map(m => (
+              <div key={m.label} style={{ flex: 1, background: 'white', borderRadius: 4, padding: '5px 6px', textAlign: 'center', border: `1px solid ${C.emeraldBorder}` }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: m.good ? C.emerald : C.amber }}>{m.value}</div>
+                <div style={{ fontSize: 9, color: C.fg3 }}>{m.label}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+      <div style={{ padding: '12px', borderTop: `1px solid ${C.borderSubtle}`, display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <button onClick={onApprove} onMouseEnter={() => setAppHov(true)} onMouseLeave={() => setAppHov(false)}
+          style={{ width: '100%', padding: '10px', borderRadius: 5, fontSize: 13, fontWeight: 600, color: '#fff',
+            background: appHov ? C.emeraldHover : C.emerald, border: 'none', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+            boxShadow: appHov ? '0 4px 12px rgba(30,138,90,0.35)' : '0 2px 6px rgba(30,138,90,0.25)',
+            transition: 'all 160ms', transform: appHov ? 'translateY(-1px)' : 'none' }}>
+          <Icon name="check" size={15} color="#fff" /> {t(lang,'approveBtn')}
+        </button>
+        <button onClick={onReject} onMouseEnter={() => setRejHov(true)} onMouseLeave={() => setRejHov(false)}
+          style={{ width: '100%', padding: '9px', borderRadius: 5, fontSize: 12, fontWeight: 500, color: C.coral,
+            background: rejHov ? C.coralLight : C.white, border: `1px solid ${C.coralBorder}`, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, transition: 'all 160ms' }}>
+          <Icon name="x" size={14} /> {t(lang,'rejectBtn')}
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// ─── WORKSPACE ───────────────────────────────────────────────
+const WorkspaceScreen = ({ onApprove, onReject }) => {
+  const lang = useLang();
+  const [activePin, setActivePin] = useState(1);
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <Topbar title={t(lang,'workspaceTitle')} subtitle={t(lang,'workspaceSub')} status="deadlock" lang={lang} />
+      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+        <BlueprintViewer activePin={activePin} onPinClick={setActivePin} />
+        <ChatPanel />
+        <ConflictPanel onApprove={onApprove} onReject={onReject} />
+      </div>
+    </div>
+  );
+};
+
+// ─── CONSENSUS ───────────────────────────────────────────────
+const ConsensusScreen = ({ onBack }) => {
+  const lang = useLang();
+  return (
+    <div style={{ flex: 1, overflow: 'auto', padding: 40, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div className="fade-in" style={{ maxWidth: 600, width: '100%' }}>
+        <div style={{ textAlign: 'center', marginBottom: 32 }}>
+          <div style={{ width: 56, height: 56, borderRadius: '50%', background: C.emeraldLight, border: `2px solid ${C.emerald}`, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
+            <Icon name="check-circle" size={28} color={C.emerald} />
+          </div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: C.fg1, marginBottom: 6 }}>{t(lang,'consensusTitle')}</div>
+          <div style={{ fontSize: 14, color: C.fg3 }}>{t(lang,'consensusSub')}</div>
+        </div>
+        <div style={{ background: C.white, borderRadius: 8, border: `1px solid ${C.borderSubtle}`, boxShadow: '0 4px 16px rgba(30,42,53,0.08)', overflow: 'hidden' }}>
+          <div style={{ padding: '16px 20px', borderBottom: `1px solid ${C.borderSubtle}`, display: 'flex', alignItems: 'center', gap: 10 }}>
+            <Icon name="file-text" size={16} color={C.fg3} />
+            <span style={{ fontSize: 14, fontWeight: 600, color: C.fg1 }}>{t(lang,'decisionRecord')}</span>
+            <span style={{ marginLeft: 'auto', fontSize: 10, fontFamily: 'monospace', color: C.fg4 }}>2026-04-24 14:32 KST</span>
+          </div>
+          <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {[
+              { label: t(lang,'drConflict'),   value: t(lang,'drConflictVal') },
+              { label: t(lang,'drResolution'), value: t(lang,'drResolutionVal') },
+              { label: t(lang,'drOutcome'),    value: t(lang,'drOutcomeVal') },
+              { label: t(lang,'drApprovals'),  value: t(lang,'drApprovalsVal') },
+            ].map(r => (
+              <div key={r.label}>
+                <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', color: C.fg3, marginBottom: 4 }}>{r.label}</div>
+                <div style={{ fontSize: 13, color: C.fg1, lineHeight: 1.5 }}>{r.value}</div>
+              </div>
+            ))}
+            <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+              <Btn variant="primary" size="md" style={{ flex: 1, justifyContent: 'center' }}>
+                <Icon name="download" size={14} /> {t(lang,'exportBtn')}
+              </Btn>
+              <Btn variant="default" size="md" onClick={onBack}>{t(lang,'backSprint')}</Btn>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ─── ROOT APP ────────────────────────────────────────────────
+const ROLE_MAP = {
+  engineer: { name: 'Lee Sungmin', initials: 'LS', role: 'engineer', roleLabel: { en: 'Hardware Engineer', ko: '하드웨어 엔지니어', zh: '硬件工程师' } },
+  designer: { name: 'Andrew Kim',  initials: 'AK', role: 'designer', roleLabel: { en: 'Product Designer',  ko: '제품 디자이너',      zh: '产品设计师' } },
+  lead:     { name: 'Kim Jiyeon',  initials: 'KJ', role: 'lead',     roleLabel: { en: 'Lead User',          ko: '리드 유저',          zh: '主要用户' } },
+};
+
+const App = () => {
+  const [screen, setScreen] = useState('login');
+  const [nav, setNav] = useState('sprints');
+  const [user, setUser] = useState(null);
+  const [lang, setLang] = useState('en');
+
+  const handleLogin = (role) => {
+    const u = ROLE_MAP[role];
+    setUser({ ...u, roleLabel: u.roleLabel[lang] || u.roleLabel.en });
+    setScreen('workspace');
+    setNav('sprints');
+  };
+
+  const handleNav = (id) => {
+    setNav(id);
+    if (id === 'hub')      setScreen('hub');
+    if (id === 'timeline') setScreen('timeline');
+    if (id === 'sprints' || id === 'conflicts') setScreen('workspace');
+  };
+
+  // Update user roleLabel when lang changes
+  useEffect(() => {
+    if (user) {
+      const u = ROLE_MAP[user.role];
+      setUser(prev => ({ ...prev, roleLabel: u.roleLabel[lang] || u.roleLabel.en }));
+    }
+  }, [lang]);
+
+  if (screen === 'login') return (
+    <LangCtx.Provider value={lang}>
+      <LoginScreen onLogin={handleLogin} lang={lang} setLang={setLang} />
+    </LangCtx.Provider>
+  );
+
+  return (
+    <LangCtx.Provider value={lang}>
+      <div style={{ display: 'flex', height: '100vh', fontFamily: 'Inter, system-ui, sans-serif' }}>
+        <Sidebar active={nav} onNav={handleNav} user={user} />
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: C.bg }}>
+          {screen === 'hub' && (
+            <>
+              <Topbar title={t(lang,'hubTitle')} subtitle={`${t(lang,'hubWelcome')}, ${user?.name || ''}`} lang={lang} setLang={setLang} />
+              <HubScreen onOpen={() => { setScreen('workspace'); setNav('sprints'); }} />
+            </>
+          )}
+          {screen === 'timeline' && (
+            <>
+              <Topbar title={t(lang,'timelineTitle')} subtitle={t(lang,'timelineSub')} lang={lang} setLang={setLang} />
+              <TimelineScreen onOpenSprint={() => { setScreen('workspace'); setNav('sprints'); }} />
+            </>
+          )}
+          {screen === 'workspace' && (
+            <WorkspaceScreen onApprove={() => setScreen('consensus')} onReject={() => {}} />
+          )}
+          {screen === 'consensus' && (
+            <>
+              <Topbar title={t(lang,'consensusOutput')} subtitle={t(lang,'consensusOutputSub')} onBack={() => setScreen('workspace')} lang={lang} setLang={setLang} />
+              <ConsensusScreen onBack={() => setScreen('workspace')} />
+            </>
+          )}
+        </div>
+      </div>
+    </LangCtx.Provider>
+  );
+};
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

@@ -1,0 +1,49 @@
+@import './styles/tokens.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body, #root { height: 100%; }
+  body {
+    font-family: 'Inter', system-ui, sans-serif;
+    background: #FAFBFC;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    color: #1E2A35;
+  }
+  button { font-family: inherit; cursor: pointer; }
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #C5D0D9; border-radius: 3px; }
+}
+
+@layer utilities {
+  .fade-in { animation: fadeIn 0.3s cubic-bezier(0.2,0,0,1) both; }
+  .slide-in { animation: slideIn 0.25s cubic-bezier(0.2,0,0,1) both; }
+}
+
+@keyframes pulse-ring {
+  0%   { box-shadow: 0 0 0 0 rgba(208,80,69,0.6), 0 0 0 0 rgba(208,80,69,0.3); }
+  70%  { box-shadow: 0 0 0 8px rgba(208,80,69,0), 0 0 0 14px rgba(208,80,69,0); }
+  100% { box-shadow: 0 0 0 0 rgba(208,80,69,0), 0 0 0 0 rgba(208,80,69,0); }
+}
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.7; transform: scale(1.15); }
+}
+@keyframes option-glow {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(30,138,90,0.4), 0 4px 16px rgba(30,138,90,0.12); }
+  50% { box-shadow: 0 0 0 3px rgba(30,138,90,0.7), 0 6px 24px rgba(30,138,90,0.22); }
+}
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(16px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
