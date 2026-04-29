@@ -59,6 +59,8 @@ function DesignMarker({
   onConfirmNote,
   onCancelPending,
   onDelete,
+  canDelete = false,
+  markerColor = C.coral,
 }) {
   const { lang } = useLang();
   const rootRef = useRef(null);
@@ -215,17 +217,19 @@ function DesignMarker({
             onContextMenu={(e) => {
               e.preventDefault();
               e.stopPropagation();
-              if (isPending) return;
+              if (isPending || !canDelete) return;
               setDeleteMenu(true);
             }}
             style={{
               width: 14,
               height: 14,
               borderRadius: '50%',
-              background: C.coral,
+              background: markerColor,
               border: '2px solid #fff',
-              boxShadow: '0 1px 4px rgba(208,80,69,0.45)',
-              cursor: isPending ? 'default' : 'pointer',
+              boxShadow: markerColor === C.emerald
+                ? '0 1px 4px rgba(30,138,90,0.45)'
+                : '0 1px 4px rgba(58,110,165,0.45)',
+              cursor: isPending || !canDelete ? 'default' : 'pointer',
             }}
           />
         </div>
@@ -281,7 +285,7 @@ function DesignMarker({
           </div>
         ) : null}
 
-        {deleteMenu && !isPending ? (
+        {deleteMenu && !isPending && canDelete ? (
           <div
             onClick={(e) => e.stopPropagation()}
             style={{
@@ -367,6 +371,7 @@ function BlueprintViewer({ projectId, designImageUrl, onUploadImage, onDeleteIma
   const [pendingMarkerId, setPendingMarkerId] = useState(null);
   const [draftNote, setDraftNote] = useState('');
   const [imageMenu, setImageMenu] = useState({ open: false, x: 0, y: 0 });
+  const [currentUserEmail, setCurrentUserEmail] = useState('');
 
   useEffect(() => {
     panXRef.current = panX;
@@ -430,6 +435,19 @@ function BlueprintViewer({ projectId, designImageUrl, onUploadImage, onDeleteIma
     return () => document.removeEventListener('mousedown', close);
   }, [imageMenu.open]);
 
+  useEffect(() => {
+    let alive = true;
+    async function loadCurrentUser() {
+      const { data } = await supabase.auth.getUser();
+      if (!alive) return;
+      setCurrentUserEmail(String(data?.user?.email || '').trim().toLowerCase());
+    }
+    loadCurrentUser();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   function normalizeMarkerRow(row) {
     if (!row) return null;
     return {
@@ -437,6 +455,7 @@ function BlueprintViewer({ projectId, designImageUrl, onUploadImage, onDeleteIma
       xPct: Number(row.x_pct ?? row.xPct ?? 0),
       yPct: Number(row.y_pct ?? row.yPct ?? 0),
       note: String(row.note ?? ''),
+      createdBy: String(row.created_by ?? row.createdBy ?? '').trim().toLowerCase(),
     };
   }
 
@@ -450,7 +469,7 @@ function BlueprintViewer({ projectId, designImageUrl, onUploadImage, onDeleteIma
       }
       const { data, error } = await supabase
         .from('markers')
-        .select('id, project_id, x_pct, y_pct, note, created_at')
+        .select('id, project_id, x_pct, y_pct, note, created_by, created_at')
         .eq('project_id', projectId)
         .order('created_at', { ascending: true });
       if (!alive) return;
@@ -482,6 +501,17 @@ function BlueprintViewer({ projectId, designImageUrl, onUploadImage, onDeleteIma
           const removedId = payload.old?.id;
           if (!removedId) return;
           setDesignMarkers((prev) => prev.filter((m) => String(m.id) !== String(removedId)));
+        },
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'markers', filter: `project_id=eq.${projectId}` },
+        (payload) => {
+          const next = normalizeMarkerRow(payload.new);
+          if (!next) return;
+          setDesignMarkers((prev) =>
+            prev.map((m) => (String(m.id) === String(next.id) ? { ...m, ...next } : m)),
+          );
         },
       )
       .subscribe();
@@ -550,10 +580,16 @@ function BlueprintViewer({ projectId, designImageUrl, onUploadImage, onDeleteIma
     });
   }
 
+  async function deleteMarkerById(markerId) {
+    if (!markerId) return;
+    await supabase.from('markers').delete().eq('id', markerId);
+    setDesignMarkers((prev) => prev.filter((m) => String(m.id) !== String(markerId)));
+  }
+
   function toggleMarkerMode() {
     if (markerMode) {
       if (pendingMarkerId) {
-        setDesignMarkers((prev) => prev.filter((m) => m.id !== pendingMarkerId));
+        void deleteMarkerById(pendingMarkerId);
         setPendingMarkerId(null);
         setDraftNote('');
       }
@@ -570,7 +606,7 @@ function BlueprintViewer({ projectId, designImageUrl, onUploadImage, onDeleteIma
       if (next) {
         if (markerMode) {
           if (pendingMarkerId) {
-            setDesignMarkers((prev) => prev.filter((m) => m.id !== pendingMarkerId));
+            void deleteMarkerById(pendingMarkerId);
             setPendingMarkerId(null);
             setDraftNote('');
           }
@@ -601,8 +637,9 @@ function BlueprintViewer({ projectId, designImageUrl, onUploadImage, onDeleteIma
         x_pct: xPct,
         y_pct: yPct,
         note: '',
+        created_by: currentUserEmail || null,
       })
-      .select('id, project_id, x_pct, y_pct, note, created_at')
+      .select('id, project_id, x_pct, y_pct, note, created_by, created_at')
       .single();
     if (error) {
       console.error('[BlueprintViewer] Failed to add marker', error);
@@ -622,9 +659,17 @@ function BlueprintViewer({ projectId, designImageUrl, onUploadImage, onDeleteIma
     setDraftNote('');
   }
 
-  function confirmPendingNote() {
+  async function confirmPendingNote() {
     if (!pendingMarkerId) return;
     const text = draftNote.trim();
+    const { error } = await supabase
+      .from('markers')
+      .update({ note: text })
+      .eq('id', pendingMarkerId);
+    if (error) {
+      console.error('[BlueprintViewer] Failed to update marker note', error);
+      return;
+    }
     setDesignMarkers((prev) =>
       prev.map((m) => (m.id === pendingMarkerId ? { ...m, note: text } : m)),
     );
@@ -632,9 +677,9 @@ function BlueprintViewer({ projectId, designImageUrl, onUploadImage, onDeleteIma
     setDraftNote('');
   }
 
-  function cancelPending() {
+  async function cancelPending() {
     if (!pendingMarkerId) return;
-    setDesignMarkers((prev) => prev.filter((m) => m.id !== pendingMarkerId));
+    await deleteMarkerById(pendingMarkerId);
     setPendingMarkerId(null);
     setDraftNote('');
   }
@@ -732,6 +777,13 @@ function BlueprintViewer({ projectId, designImageUrl, onUploadImage, onDeleteIma
           />
         ) : null}
         {designMarkers.map((m) => (
+          (() => {
+            const isMine = Boolean(
+              String(m.createdBy || '').trim().toLowerCase()
+              && String(currentUserEmail || '').trim().toLowerCase()
+              && String(m.createdBy || '').trim().toLowerCase() === String(currentUserEmail || '').trim().toLowerCase(),
+            );
+            return (
           <DesignMarker
             key={m.id}
             marker={m}
@@ -740,15 +792,18 @@ function BlueprintViewer({ projectId, designImageUrl, onUploadImage, onDeleteIma
             onDraftChange={setDraftNote}
             onConfirmNote={confirmPendingNote}
             onCancelPending={cancelPending}
+            canDelete={isMine}
+            markerColor={isMine ? C.emerald : '#3A6EA5'}
             onDelete={async () => {
-              await supabase.from('markers').delete().eq('id', m.id);
-              setDesignMarkers((prev) => prev.filter((x) => String(x.id) !== String(m.id)));
+              await deleteMarkerById(m.id);
               if (pendingMarkerId === m.id) {
                 setPendingMarkerId(null);
                 setDraftNote('');
               }
             }}
           />
+            );
+          })()
         ))}
           </div>
         </div>
