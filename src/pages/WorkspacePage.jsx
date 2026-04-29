@@ -512,6 +512,7 @@ function BlueprintViewer({ projectId, designImageUrl, onUploadImage, onDeleteIma
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'markers', filter: `project_id=eq.${projectId}` },
         (payload) => {
+          console.log('[markers realtime] INSERT payload', payload);
           const next = normalizeMarkerRow(payload.new);
           if (!next) return;
           setDesignMarkers((prev) => (prev.some((m) => String(m.id) === String(next.id)) ? prev : [...prev, next]));
@@ -519,10 +520,19 @@ function BlueprintViewer({ projectId, designImageUrl, onUploadImage, onDeleteIma
       )
       .on(
         'postgres_changes',
-        { event: 'DELETE', schema: 'public', table: 'markers', filter: `project_id=eq.${projectId}` },
+        { event: 'DELETE', schema: 'public', table: 'markers' },
         (payload) => {
-          const removedId = payload.old?.id;
-          if (!removedId) return;
+          console.log('[markers realtime] DELETE payload', payload, {
+            oldRow: payload?.old,
+            removedId: payload?.old?.id,
+            projectId,
+          });
+          const removedId = payload?.old?.id;
+          if (!removedId) {
+            console.warn('[markers realtime] DELETE received without id in payload.old. ' +
+              'Set REPLICA IDENTITY FULL on public.markers to receive full old row.');
+            return;
+          }
           setDesignMarkers((prev) => prev.filter((m) => String(m.id) !== String(removedId)));
         },
       )
@@ -530,6 +540,7 @@ function BlueprintViewer({ projectId, designImageUrl, onUploadImage, onDeleteIma
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'markers', filter: `project_id=eq.${projectId}` },
         (payload) => {
+          console.log('[markers realtime] UPDATE payload', payload);
           const next = normalizeMarkerRow(payload.new);
           if (!next) return;
           setDesignMarkers((prev) =>
@@ -537,7 +548,9 @@ function BlueprintViewer({ projectId, designImageUrl, onUploadImage, onDeleteIma
           );
         },
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log('[markers realtime] channel status', status, { projectId });
+      });
 
     return () => {
       alive = false;
