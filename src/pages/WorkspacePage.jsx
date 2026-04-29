@@ -903,7 +903,21 @@ function ChatPanel({ projectId, senderRole = 'engineer' }) {
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteState, setInviteState] = useState({ status: 'idle', message: '' });
   const [currentUserEmail, setCurrentUserEmail] = useState('');
+  const [currentUserFullName, setCurrentUserFullName] = useState('');
   const scrollRef = useRef(null);
+
+  function getAvatarInitials(fullName, email) {
+    const name = String(fullName || '').trim();
+    if (name) {
+      const parts = name.split(/\s+/).filter(Boolean);
+      if (parts.length >= 2) {
+        return `${parts[0][0] || ''}${parts[1][0] || ''}`.toUpperCase();
+      }
+      return name.slice(0, 2).toUpperCase();
+    }
+    const local = String(email || '').split('@')[0] || '';
+    return (local.slice(0, 2) || 'US').toUpperCase();
+  }
 
   useEffect(() => {
     let alive = true;
@@ -911,6 +925,7 @@ function ChatPanel({ projectId, senderRole = 'engineer' }) {
       const { data } = await supabase.auth.getUser();
       if (!alive) return;
       setCurrentUserEmail(data?.user?.email || '');
+      setCurrentUserFullName(data?.user?.user_metadata?.full_name || '');
     }
     loadCurrentUser();
     return () => {
@@ -929,8 +944,25 @@ function ChatPanel({ projectId, senderRole = 'engineer' }) {
       let query = projectId ? base.eq('project_id', projectId) : base;
       let { data, error } = await query;
 
-      // Fallback: table without project_id column.
+      // Fallback: table without sender_email/project_id columns.
+      if (error && /sender_email/i.test(error.message || '')) {
+        base = supabase
+          .from('messages')
+          .select('id, content, sender_role, created_at, project_id')
+          .order('created_at', { ascending: true })
+          .limit(200);
+        query = projectId ? base.eq('project_id', projectId) : base;
+        ({ data, error } = await query);
+      }
       if (error && /project_id/i.test(error.message || '')) {
+        base = supabase
+          .from('messages')
+          .select('id, content, sender_role, sender_email, created_at')
+          .order('created_at', { ascending: true })
+          .limit(200);
+        ({ data, error } = await base);
+      }
+      if (error && /sender_email/i.test(error.message || '')) {
         base = supabase
           .from('messages')
           .select('id, content, sender_role, created_at')
@@ -1139,9 +1171,15 @@ function ChatPanel({ projectId, senderRole = 'engineer' }) {
         ) : messages.map((msg) => {
           const senderEmail = msg.sender_email || '';
           const emailPrefix = senderEmail.includes('@') ? senderEmail.split('@')[0] : '';
-          const mePrefix = currentUserEmail.includes('@') ? currentUserEmail.split('@')[0] : '';
-          const isMine = Boolean(mePrefix && emailPrefix && mePrefix === emailPrefix);
-          const name = emailPrefix || (lang === 'ko' ? '사용자' : lang === 'zh' ? '用户' : 'User');
+          const normalizedSenderEmail = String(senderEmail || '').trim().toLowerCase();
+          const normalizedMyEmail = String(currentUserEmail || '').trim().toLowerCase();
+          const isMine = Boolean(normalizedSenderEmail && normalizedMyEmail && normalizedSenderEmail === normalizedMyEmail);
+          const name = isMine
+            ? (currentUserFullName || emailPrefix || (lang === 'ko' ? '사용자' : lang === 'zh' ? '用户' : 'User'))
+            : (emailPrefix || (lang === 'ko' ? '사용자' : lang === 'zh' ? '用户' : 'User'));
+          const avatarLabel = isMine
+            ? getAvatarInitials(currentUserFullName, currentUserEmail)
+            : getAvatarInitials('', senderEmail);
           const avatarBg = isMine ? C.emerald : '#3A6EA5';
           const text = msg.content || '';
 
@@ -1161,7 +1199,7 @@ function ChatPanel({ projectId, senderRole = 'engineer' }) {
                     textTransform: 'uppercase',
                   }}
                 >
-                  {(name || 'U').slice(0, 2)}
+                  {avatarLabel}
                 </div>
               ) : null}
               <div style={{ maxWidth: '78%', display: 'flex', flexDirection: 'column', alignItems: isMine ? 'flex-end' : 'flex-start' }}>
@@ -1191,7 +1229,7 @@ function ChatPanel({ projectId, senderRole = 'engineer' }) {
                     textTransform: 'uppercase',
                   }}
                 >
-                  {(name || 'U').slice(0, 2)}
+                  {avatarLabel}
                 </div>
               ) : null}
             </div>
