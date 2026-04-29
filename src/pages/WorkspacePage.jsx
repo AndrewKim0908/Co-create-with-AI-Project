@@ -391,7 +391,7 @@ function BlueprintViewer({ projectId, designImageUrl, onUploadImage, onDeleteIma
   const [panX, setPanX] = useState(0);
   const [panY, setPanY] = useState(0);
   const [designMarkers, setDesignMarkers] = useState([]);
-  const [pendingMarkerId, setPendingMarkerId] = useState(null);
+  const [pendingMarker, setPendingMarker] = useState(null);
   const [draftNote, setDraftNote] = useState('');
   const [imageMenu, setImageMenu] = useState({ open: false, x: 0, y: 0 });
   const [currentUserEmail, setCurrentUserEmail] = useState('');
@@ -644,13 +644,14 @@ function BlueprintViewer({ projectId, designImageUrl, onUploadImage, onDeleteIma
     setDesignMarkers((prev) => prev.filter((m) => String(m.id) !== String(markerId)));
   }
 
+  function clearPendingDraft() {
+    setPendingMarker(null);
+    setDraftNote('');
+  }
+
   function toggleMarkerMode() {
     if (markerMode) {
-      if (pendingMarkerId) {
-        void deleteMarkerById(pendingMarkerId);
-        setPendingMarkerId(null);
-        setDraftNote('');
-      }
+      clearPendingDraft();
       setMarkerMode(false);
     } else {
       setHandTool(false);
@@ -663,11 +664,7 @@ function BlueprintViewer({ projectId, designImageUrl, onUploadImage, onDeleteIma
       const next = !h;
       if (next) {
         if (markerMode) {
-          if (pendingMarkerId) {
-            void deleteMarkerById(pendingMarkerId);
-            setPendingMarkerId(null);
-            setDraftNote('');
-          }
+          clearPendingDraft();
           setMarkerMode(false);
         }
       }
@@ -675,102 +672,77 @@ function BlueprintViewer({ projectId, designImageUrl, onUploadImage, onDeleteIma
     });
   }
 
-  async function handleCanvasClick(e) {
+  function handleCanvasClick(e) {
     if (skipNextMarkerClick.current) {
       skipNextMarkerClick.current = false;
       return;
     }
     if (!markerMode || handTool) return;
     if (e.target.closest('[data-marker-root]')) return;
+    if (!projectId) return;
     const el = canvasRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
     const xPct = ((e.clientX - rect.left) / rect.width) * 100;
     const yPct = ((e.clientY - rect.top) / rect.height) * 100;
-    if (!projectId) return;
-    const { data, error } = await supabase
-      .from('markers')
-      .insert({
-        project_id: projectId,
-        x_pct: xPct,
-        y_pct: yPct,
-        note: '',
-        created_by: currentUserEmail || null,
-      })
-      .select('id, project_id, x_pct, y_pct, note, created_by, created_at')
-      .single();
-    if (error) {
-      console.error('[BlueprintViewer] Failed to add marker', error);
-      return;
-    }
-    const inserted = normalizeMarkerRow(data);
-    if (!inserted) return;
-    setDesignMarkers((prev) => {
-      const withoutPending = pendingMarkerId
-        ? prev.filter((m) => String(m.id) !== String(pendingMarkerId))
-        : prev;
-      return withoutPending.some((m) => String(m.id) === String(inserted.id))
-        ? withoutPending
-        : [...withoutPending, inserted];
-    });
-    setPendingMarkerId(inserted.id);
+    setPendingMarker({ xPct, yPct });
     setDraftNote('');
   }
 
   async function confirmPendingNote() {
-    if (!pendingMarkerId) return;
+    if (!pendingMarker || !projectId) return;
     const text = draftNote.trim();
+    const insertPayload = {
+      project_id: projectId,
+      x_pct: pendingMarker.xPct,
+      y_pct: pendingMarker.yPct,
+      note: text,
+      created_by: currentUserEmail || null,
+    };
     const queryDescription = {
       table: 'markers',
-      operation: 'update',
-      payload: { note: text },
-      filter: { id: pendingMarkerId },
-      pseudoSql: `update markers set note = $1 where id = $2 returning *; -- $1=${JSON.stringify(text)}, $2=${JSON.stringify(pendingMarkerId)}`,
+      operation: 'insert',
+      payload: insertPayload,
+      pseudoSql:
+        'insert into markers (project_id, x_pct, y_pct, note, created_by) ' +
+        'values ($1, $2, $3, $4, $5) returning *; ' +
+        `-- payload=${JSON.stringify(insertPayload)}`,
     };
-    console.log('[BlueprintViewer] Updating marker note (request)', queryDescription);
+    console.log('[BlueprintViewer] Inserting marker (request)', queryDescription);
 
-    const { data, error, status, statusText, count } = await supabase
+    const { data, error, status, statusText } = await supabase
       .from('markers')
-      .update({ note: text })
-      .eq('id', pendingMarkerId)
-      .select('id, project_id, x_pct, y_pct, note, created_by, created_at');
+      .insert(insertPayload)
+      .select('id, project_id, x_pct, y_pct, note, created_by, created_at')
+      .single();
 
-    console.log('[BlueprintViewer] Updating marker note (response)', {
+    console.log('[BlueprintViewer] Inserting marker (response)', {
       query: queryDescription,
       data,
       error,
       status,
       statusText,
-      count,
     });
 
     if (error) {
-      console.error('[BlueprintViewer] Failed to update marker note', {
+      console.error('[BlueprintViewer] Failed to insert marker', {
         error,
         query: queryDescription,
       });
       return;
     }
 
-    if (Array.isArray(data) && data.length === 0) {
-      console.warn('[BlueprintViewer] Update affected 0 rows. Check RLS / id match.', {
-        query: queryDescription,
-        data,
-      });
+    const inserted = normalizeMarkerRow(data);
+    if (inserted) {
+      setDesignMarkers((prev) =>
+        prev.some((m) => String(m.id) === String(inserted.id)) ? prev : [...prev, inserted],
+      );
     }
-
-    setDesignMarkers((prev) =>
-      prev.map((m) => (m.id === pendingMarkerId ? { ...m, note: text } : m)),
-    );
-    setPendingMarkerId(null);
-    setDraftNote('');
+    clearPendingDraft();
   }
 
-  async function cancelPending() {
-    if (!pendingMarkerId) return;
-    await deleteMarkerById(pendingMarkerId);
-    setPendingMarkerId(null);
-    setDraftNote('');
+  function cancelPending() {
+    clearPendingDraft();
   }
 
   const canvasCursor = viewportCursor();
@@ -875,8 +847,8 @@ function BlueprintViewer({ projectId, designImageUrl, onUploadImage, onDeleteIma
           <DesignMarker
             key={m.id}
             marker={m}
-            isPending={pendingMarkerId === m.id}
-            draftNote={pendingMarkerId === m.id ? draftNote : ''}
+            isPending={false}
+            draftNote=""
             onDraftChange={setDraftNote}
             onConfirmNote={confirmPendingNote}
             onCancelPending={cancelPending}
@@ -885,15 +857,36 @@ function BlueprintViewer({ projectId, designImageUrl, onUploadImage, onDeleteIma
             noteColor={markerUserColor}
             onDelete={async () => {
               await deleteMarkerById(m.id);
-              if (pendingMarkerId === m.id) {
-                setPendingMarkerId(null);
-                setDraftNote('');
-              }
             }}
           />
             );
           })()
         ))}
+        {pendingMarker ? (
+          (() => {
+            const myColor = getUserColor(currentUserEmail);
+            return (
+              <DesignMarker
+                key="__draft_marker__"
+                marker={{
+                  id: '__draft_marker__',
+                  xPct: pendingMarker.xPct,
+                  yPct: pendingMarker.yPct,
+                  note: '',
+                }}
+                isPending
+                draftNote={draftNote}
+                onDraftChange={setDraftNote}
+                onConfirmNote={confirmPendingNote}
+                onCancelPending={cancelPending}
+                canDelete={false}
+                markerColor={myColor}
+                noteColor={myColor}
+                onDelete={() => {}}
+              />
+            );
+          })()
+        ) : null}
           </div>
         </div>
       </div>
