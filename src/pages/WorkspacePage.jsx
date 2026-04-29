@@ -18,6 +18,30 @@ const MARKER_MODE_CURSOR =
 
 const ZOOM_MIN = 0.2;
 const ZOOM_MAX = 5;
+const USER_COLOR_PALETTE = [
+  '#10B981',
+  '#3A6EA5',
+  '#8B5CF6',
+  '#F59E0B',
+  '#EF4444',
+  '#14B8A6',
+  '#EC4899',
+  '#6366F1',
+  '#22C55E',
+  '#0EA5E9',
+];
+
+function getUserColor(email) {
+  const normalized = String(email || '').trim().toLowerCase();
+  if (!normalized) return '#64748B';
+  let hash = 0;
+  for (let i = 0; i < normalized.length; i += 1) {
+    hash = ((hash << 5) - hash) + normalized.charCodeAt(i);
+    hash |= 0;
+  }
+  const idx = Math.abs(hash) % USER_COLOR_PALETTE.length;
+  return USER_COLOR_PALETTE[idx];
+}
 
 function isEditableKeyboardTarget(target) {
   if (!target || typeof target !== 'object') return false;
@@ -61,6 +85,7 @@ function DesignMarker({
   onDelete,
   canDelete = false,
   markerColor = C.coral,
+  noteColor = C.fg2,
 }) {
   const { lang } = useLang();
   const rootRef = useRef(null);
@@ -226,9 +251,7 @@ function DesignMarker({
               borderRadius: '50%',
               background: markerColor,
               border: '2px solid #fff',
-              boxShadow: markerColor === C.emerald
-                ? '0 1px 4px rgba(30,138,90,0.45)'
-                : '0 1px 4px rgba(58,110,165,0.45)',
+              boxShadow: '0 1px 4px rgba(30,42,53,0.35)',
               cursor: isPending || !canDelete ? 'default' : 'pointer',
             }}
           />
@@ -261,7 +284,7 @@ function DesignMarker({
                 borderRadius: 8,
                 fontSize: 11,
                 lineHeight: 1.45,
-                color: C.fg2,
+                color: noteColor,
                 boxShadow: '0 4px 12px rgba(30,42,53,0.1)',
                 whiteSpace: 'normal',
               }}
@@ -778,11 +801,10 @@ function BlueprintViewer({ projectId, designImageUrl, onUploadImage, onDeleteIma
         ) : null}
         {designMarkers.map((m) => (
           (() => {
-            const isMine = Boolean(
-              String(m.createdBy || '').trim().toLowerCase()
-              && String(currentUserEmail || '').trim().toLowerCase()
-              && String(m.createdBy || '').trim().toLowerCase() === String(currentUserEmail || '').trim().toLowerCase(),
-            );
+            const markerEmail = String(m.createdBy || '').trim().toLowerCase();
+            const myEmail = String(currentUserEmail || '').trim().toLowerCase();
+            const isMine = Boolean(markerEmail && myEmail && markerEmail === myEmail);
+            const markerUserColor = getUserColor(markerEmail);
             return (
           <DesignMarker
             key={m.id}
@@ -793,7 +815,8 @@ function BlueprintViewer({ projectId, designImageUrl, onUploadImage, onDeleteIma
             onConfirmNote={confirmPendingNote}
             onCancelPending={cancelPending}
             canDelete={isMine}
-            markerColor={isMine ? C.emerald : '#3A6EA5'}
+            markerColor={markerUserColor}
+            noteColor={markerUserColor}
             onDelete={async () => {
               await deleteMarkerById(m.id);
               if (pendingMarkerId === m.id) {
@@ -1040,8 +1063,8 @@ function ChatPanel({ projectId, senderRole = 'engineer' }) {
   const [currentUserFullName, setCurrentUserFullName] = useState('');
   const scrollRef = useRef(null);
 
-  function getAvatarInitials(fullName, email) {
-    const name = String(fullName || '').trim();
+  function getAvatarInitials(displayName, email) {
+    const name = String(displayName || '').trim();
     if (name) {
       const parts = name.split(/\s+/).filter(Boolean);
       if (parts.length >= 2) {
@@ -1071,18 +1094,29 @@ function ChatPanel({ projectId, senderRole = 'engineer' }) {
     async function loadMessages() {
       let base = supabase
         .from('messages')
-        .select('id, content, sender_role, sender_email, created_at, project_id')
+        .select('id, content, sender_role, sender_name, sender_email, created_at, project_id')
         .order('created_at', { ascending: true })
         .limit(200);
 
       let query = projectId ? base.eq('project_id', projectId) : base;
       let { data, error } = await query;
 
+      // Fallback: table without sender_name column.
+      if (error && /sender_name/i.test(error.message || '')) {
+        base = supabase
+          .from('messages')
+          .select('id, content, sender_role, sender_email, created_at, project_id')
+          .order('created_at', { ascending: true })
+          .limit(200);
+        query = projectId ? base.eq('project_id', projectId) : base;
+        ({ data, error } = await query);
+      }
+
       // Fallback: table without sender_email/project_id columns.
       if (error && /sender_email/i.test(error.message || '')) {
         base = supabase
           .from('messages')
-          .select('id, content, sender_role, created_at, project_id')
+          .select('id, content, sender_role, sender_name, created_at, project_id')
           .order('created_at', { ascending: true })
           .limit(200);
         query = projectId ? base.eq('project_id', projectId) : base;
@@ -1091,12 +1125,28 @@ function ChatPanel({ projectId, senderRole = 'engineer' }) {
       if (error && /project_id/i.test(error.message || '')) {
         base = supabase
           .from('messages')
+          .select('id, content, sender_role, sender_name, sender_email, created_at')
+          .order('created_at', { ascending: true })
+          .limit(200);
+        ({ data, error } = await base);
+      }
+      if (error && /sender_name/i.test(error.message || '')) {
+        base = supabase
+          .from('messages')
           .select('id, content, sender_role, sender_email, created_at')
           .order('created_at', { ascending: true })
           .limit(200);
         ({ data, error } = await base);
       }
       if (error && /sender_email/i.test(error.message || '')) {
+        base = supabase
+          .from('messages')
+          .select('id, content, sender_role, sender_name, created_at')
+          .order('created_at', { ascending: true })
+          .limit(200);
+        ({ data, error } = await base);
+      }
+      if (error && /sender_name/i.test(error.message || '')) {
         base = supabase
           .from('messages')
           .select('id, content, sender_role, created_at')
@@ -1145,12 +1195,33 @@ function ChatPanel({ projectId, senderRole = 'engineer' }) {
     let { error } = await supabase.from('messages').insert({
       content,
       sender_role: senderRole,
+      sender_name: currentUserFullName || null,
       sender_email: currentUserEmail || null,
       project_id: projectId || null,
     });
 
+    // Fallback when sender_name column doesn't exist.
+    if (error && /sender_name/i.test(error.message || '')) {
+      const fallback = await supabase.from('messages').insert({
+        content,
+        sender_role: senderRole,
+        sender_email: currentUserEmail || null,
+        project_id: projectId || null,
+      });
+      error = fallback.error;
+    }
+
     // Fallback when project_id column doesn't exist.
     if (error && /project_id/i.test(error.message || '')) {
+      const fallback = await supabase.from('messages').insert({
+        content,
+        sender_role: senderRole,
+        sender_name: currentUserFullName || null,
+        sender_email: currentUserEmail || null,
+      });
+      error = fallback.error;
+    }
+    if (error && /sender_name/i.test(error.message || '')) {
       const fallback = await supabase.from('messages').insert({
         content,
         sender_role: senderRole,
@@ -1163,15 +1234,32 @@ function ChatPanel({ projectId, senderRole = 'engineer' }) {
       let fallback = await supabase.from('messages').insert({
         content,
         sender_role: senderRole,
+        sender_name: currentUserFullName || null,
         project_id: projectId || null,
       });
       error = fallback.error;
+      if (error && /sender_name/i.test(error.message || '')) {
+        fallback = await supabase.from('messages').insert({
+          content,
+          sender_role: senderRole,
+          project_id: projectId || null,
+        });
+        error = fallback.error;
+      }
       if (error && /project_id/i.test(error.message || '')) {
         fallback = await supabase.from('messages').insert({
           content,
           sender_role: senderRole,
+          sender_name: currentUserFullName || null,
         });
         error = fallback.error;
+        if (error && /sender_name/i.test(error.message || '')) {
+          fallback = await supabase.from('messages').insert({
+            content,
+            sender_role: senderRole,
+          });
+          error = fallback.error;
+        }
       }
     }
 
@@ -1304,17 +1392,15 @@ function ChatPanel({ projectId, senderRole = 'engineer' }) {
           </div>
         ) : messages.map((msg) => {
           const senderEmail = msg.sender_email || '';
+          const senderName = String(msg.sender_name || '').trim();
           const emailPrefix = senderEmail.includes('@') ? senderEmail.split('@')[0] : '';
           const normalizedSenderEmail = String(senderEmail || '').trim().toLowerCase();
           const normalizedMyEmail = String(currentUserEmail || '').trim().toLowerCase();
           const isMine = Boolean(normalizedSenderEmail && normalizedMyEmail && normalizedSenderEmail === normalizedMyEmail);
-          const name = isMine
-            ? (currentUserFullName || emailPrefix || (lang === 'ko' ? '사용자' : lang === 'zh' ? '用户' : 'User'))
-            : (emailPrefix || (lang === 'ko' ? '사용자' : lang === 'zh' ? '用户' : 'User'));
-          const avatarLabel = isMine
-            ? getAvatarInitials(currentUserFullName, currentUserEmail)
-            : getAvatarInitials('', senderEmail);
-          const avatarBg = isMine ? C.emerald : '#3A6EA5';
+          const userColor = getUserColor(normalizedSenderEmail);
+          const name = senderName || emailPrefix || (lang === 'ko' ? '사용자' : lang === 'zh' ? '用户' : 'User');
+          const avatarLabel = getAvatarInitials(senderName || (isMine ? currentUserFullName : ''), senderEmail);
+          const avatarBg = userColor;
           const text = msg.content || '';
 
           return (
