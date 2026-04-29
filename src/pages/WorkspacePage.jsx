@@ -1042,14 +1042,47 @@ function ChatPanel({ projectId, senderRole = 'engineer' }) {
       status: 'pending',
       invited_by: inviterId,
     });
+    const isAlreadyInvited =
+      String(error?.code) === '23505' || /duplicate|unique/i.test(error?.message || '');
     if (error) {
-      if (String(error.code) === '23505' || /duplicate|unique/i.test(error.message || '')) {
-        setInviteState({ status: 'error', message: t('alreadyInvited') });
-        return false;
-      }
+      // Keep going for duplicate pending rows so invite email can still be sent.
+      if (isAlreadyInvited) {
+        console.log('[handleInvite] Existing invite row found; proceeding to Edge Function call.', {
+          projectId,
+          email: normalized,
+        });
+      } else {
       setInviteState({ status: 'error', message: error.message || t('inviteFailed') });
       return false;
+      }
     }
+
+    console.log('[handleInvite] Invoking Edge Function invite-project-member', {
+      projectId,
+      email: normalized,
+    });
+    const { error: invokeError } = await supabase.functions.invoke('invite-project-member', {
+      body: { email: normalized, projectId },
+    });
+    console.log('[handleInvite] Edge Function invite-project-member result', {
+      ok: !invokeError,
+      error: invokeError?.message || null,
+      projectId,
+      email: normalized,
+    });
+    if (invokeError) {
+      if (!isAlreadyInvited) {
+        await supabase
+          .from('project_members')
+          .delete()
+          .eq('project_id', projectId)
+          .eq('invited_email', normalized)
+          .eq('invited_by', inviterId);
+      }
+      setInviteState({ status: 'error', message: invokeError.message || t('inviteEmailFailed') });
+      return false;
+    }
+
     setInviteState({ status: 'success', message: t('inviteSent') });
     return true;
   }
