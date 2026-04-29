@@ -540,12 +540,34 @@ function BlueprintViewer({ projectId, designImageUrl, onUploadImage, onDeleteIma
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'markers', filter: `project_id=eq.${projectId}` },
         (payload) => {
-          console.log('[markers realtime] UPDATE payload', payload);
+          console.log('[markers realtime] UPDATE payload', payload, {
+            newRow: payload?.new,
+            oldRow: payload?.old,
+            newNote: payload?.new?.note,
+            id: payload?.new?.id,
+            projectId,
+          });
           const next = normalizeMarkerRow(payload.new);
-          if (!next) return;
-          setDesignMarkers((prev) =>
-            prev.map((m) => (String(m.id) === String(next.id) ? { ...m, ...next } : m)),
-          );
+          if (!next) {
+            console.warn('[markers realtime] UPDATE received without normalizable payload.new', payload);
+            return;
+          }
+          setDesignMarkers((prev) => {
+            const exists = prev.some((m) => String(m.id) === String(next.id));
+            if (!exists) {
+              console.log('[markers realtime] UPDATE for unknown marker; appending', next);
+              return [...prev, next];
+            }
+            return prev.map((m) =>
+              String(m.id) === String(next.id)
+                ? {
+                    ...m,
+                    ...next,
+                    note: next.note,
+                  }
+                : m,
+            );
+          });
         },
       )
       .subscribe((status) => {
