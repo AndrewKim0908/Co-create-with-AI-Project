@@ -346,7 +346,7 @@ function DesignMarker({
   );
 }
 
-function BlueprintViewer({ designImageUrl, onUploadImage, onDeleteImage, uploadState }) {
+function BlueprintViewer({ projectId, designImageUrl, onUploadImage, onDeleteImage, uploadState }) {
   const { t } = useLang();
   const canvasRef = useRef(null);
   const viewportRef = useRef(null);
@@ -429,6 +429,68 @@ function BlueprintViewer({ designImageUrl, onUploadImage, onDeleteImage, uploadS
     document.addEventListener('mousedown', close);
     return () => document.removeEventListener('mousedown', close);
   }, [imageMenu.open]);
+
+  function normalizeMarkerRow(row) {
+    if (!row) return null;
+    return {
+      id: String(row.id),
+      xPct: Number(row.x_pct ?? row.xPct ?? 0),
+      yPct: Number(row.y_pct ?? row.yPct ?? 0),
+      note: String(row.note ?? ''),
+    };
+  }
+
+  useEffect(() => {
+    let alive = true;
+
+    async function loadMarkers() {
+      if (!projectId) {
+        setDesignMarkers([]);
+        return;
+      }
+      const { data, error } = await supabase
+        .from('markers')
+        .select('id, project_id, x_pct, y_pct, note, created_at')
+        .eq('project_id', projectId)
+        .order('created_at', { ascending: true });
+      if (!alive) return;
+      if (error) {
+        console.error('[BlueprintViewer] Failed to load markers', error);
+        return;
+      }
+      setDesignMarkers((data || []).map(normalizeMarkerRow).filter(Boolean));
+    }
+
+    loadMarkers();
+
+    if (!projectId) return () => { alive = false; };
+    const channel = supabase
+      .channel(`markers-realtime-${projectId}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'markers', filter: `project_id=eq.${projectId}` },
+        (payload) => {
+          const next = normalizeMarkerRow(payload.new);
+          if (!next) return;
+          setDesignMarkers((prev) => (prev.some((m) => String(m.id) === String(next.id)) ? prev : [...prev, next]));
+        },
+      )
+      .on(
+        'postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'markers', filter: `project_id=eq.${projectId}` },
+        (payload) => {
+          const removedId = payload.old?.id;
+          if (!removedId) return;
+          setDesignMarkers((prev) => prev.filter((m) => String(m.id) !== String(removedId)));
+        },
+      )
+      .subscribe();
+
+    return () => {
+      alive = false;
+      supabase.removeChannel(channel);
+    };
+  }, [projectId]);
 
   function viewportCursor() {
     if (isPanning) return 'grabbing';
@@ -519,7 +581,7 @@ function BlueprintViewer({ designImageUrl, onUploadImage, onDeleteImage, uploadS
     });
   }
 
-  function handleCanvasClick(e) {
+  async function handleCanvasClick(e) {
     if (skipNextMarkerClick.current) {
       skipNextMarkerClick.current = false;
       return;
@@ -531,16 +593,32 @@ function BlueprintViewer({ designImageUrl, onUploadImage, onDeleteImage, uploadS
     const rect = el.getBoundingClientRect();
     const xPct = ((e.clientX - rect.left) / rect.width) * 100;
     const yPct = ((e.clientY - rect.top) / rect.height) * 100;
-    const id = typeof crypto !== 'undefined' && crypto.randomUUID
-      ? crypto.randomUUID()
-      : `m-${Date.now()}`;
+    if (!projectId) return;
+    const { data, error } = await supabase
+      .from('markers')
+      .insert({
+        project_id: projectId,
+        x_pct: xPct,
+        y_pct: yPct,
+        note: '',
+      })
+      .select('id, project_id, x_pct, y_pct, note, created_at')
+      .single();
+    if (error) {
+      console.error('[BlueprintViewer] Failed to add marker', error);
+      return;
+    }
+    const inserted = normalizeMarkerRow(data);
+    if (!inserted) return;
     setDesignMarkers((prev) => {
-      const next = pendingMarkerId
-        ? prev.filter((m) => m.id !== pendingMarkerId)
+      const withoutPending = pendingMarkerId
+        ? prev.filter((m) => String(m.id) !== String(pendingMarkerId))
         : prev;
-      return [...next, { id, xPct, yPct, note: '' }];
+      return withoutPending.some((m) => String(m.id) === String(inserted.id))
+        ? withoutPending
+        : [...withoutPending, inserted];
     });
-    setPendingMarkerId(id);
+    setPendingMarkerId(inserted.id);
     setDraftNote('');
   }
 
@@ -662,8 +740,9 @@ function BlueprintViewer({ designImageUrl, onUploadImage, onDeleteImage, uploadS
             onDraftChange={setDraftNote}
             onConfirmNote={confirmPendingNote}
             onCancelPending={cancelPending}
-            onDelete={() => {
-              setDesignMarkers((prev) => prev.filter((x) => x.id !== m.id));
+            onDelete={async () => {
+              await supabase.from('markers').delete().eq('id', m.id);
+              setDesignMarkers((prev) => prev.filter((x) => String(x.id) !== String(m.id)));
               if (pendingMarkerId === m.id) {
                 setPendingMarkerId(null);
                 setDraftNote('');
@@ -2059,6 +2138,7 @@ export default function WorkspacePage() {
       />
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden', minWidth: 0 }}>
         <BlueprintViewer
+          projectId={projectId}
           designImageUrl={designImage.url}
           onUploadImage={onUploadImage}
           onDeleteImage={onDeleteImage}
