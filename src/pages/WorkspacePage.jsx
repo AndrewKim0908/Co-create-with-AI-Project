@@ -720,14 +720,45 @@ function BlueprintViewer({ projectId, designImageUrl, onUploadImage, onDeleteIma
   async function confirmPendingNote() {
     if (!pendingMarkerId) return;
     const text = draftNote.trim();
-    const { error } = await supabase
+    const queryDescription = {
+      table: 'markers',
+      operation: 'update',
+      payload: { note: text },
+      filter: { id: pendingMarkerId },
+      pseudoSql: `update markers set note = $1 where id = $2 returning *; -- $1=${JSON.stringify(text)}, $2=${JSON.stringify(pendingMarkerId)}`,
+    };
+    console.log('[BlueprintViewer] Updating marker note (request)', queryDescription);
+
+    const { data, error, status, statusText, count } = await supabase
       .from('markers')
       .update({ note: text })
-      .eq('id', pendingMarkerId);
+      .eq('id', pendingMarkerId)
+      .select('id, project_id, x_pct, y_pct, note, created_by, created_at');
+
+    console.log('[BlueprintViewer] Updating marker note (response)', {
+      query: queryDescription,
+      data,
+      error,
+      status,
+      statusText,
+      count,
+    });
+
     if (error) {
-      console.error('[BlueprintViewer] Failed to update marker note', error);
+      console.error('[BlueprintViewer] Failed to update marker note', {
+        error,
+        query: queryDescription,
+      });
       return;
     }
+
+    if (Array.isArray(data) && data.length === 0) {
+      console.warn('[BlueprintViewer] Update affected 0 rows. Check RLS / id match.', {
+        query: queryDescription,
+        data,
+      });
+    }
+
     setDesignMarkers((prev) =>
       prev.map((m) => (m.id === pendingMarkerId ? { ...m, note: text } : m)),
     );
