@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import Icon from '@/components/Icon';
 import LangSwitcher from '@/components/LangSwitcher';
@@ -13,7 +14,6 @@ export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [mode, setMode] = useState('signin'); // signin | signup
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState({ type: 'idle', text: '' });
 
@@ -25,9 +25,7 @@ export default function LoginPage() {
     setBusy(true);
     setMsg({ type: 'idle', text: '' });
 
-    const action = mode === 'signup'
-      ? supabase.auth.signUp({ email: email.trim(), password })
-      : supabase.auth.signInWithPassword({ email: email.trim(), password });
+    const action = supabase.auth.signInWithPassword({ email: email.trim(), password });
 
     const { error } = await action;
     if (error) {
@@ -36,11 +34,6 @@ export default function LoginPage() {
       return;
     }
 
-    if (mode === 'signup') {
-      setMsg({ type: 'success', text: t('authSignupSuccess') });
-      setBusy(false);
-      return;
-    }
     setMsg({ type: 'success', text: t('authSigninSuccess') });
     setBusy(false);
   };
@@ -125,9 +118,7 @@ export default function LoginPage() {
             <span>
               {busy
                 ? t('hubCreateSaving')
-                : mode === 'signup'
-                  ? t('authSignupBtn')
-                  : t('signInBtn')}
+                : t('signInBtn')}
             </span>
             <Icon
               name="arrow-right"
@@ -142,13 +133,11 @@ export default function LoginPage() {
             </div>
           ) : null}
 
-          <button
-            type="button"
-            onClick={() => setMode((v) => (v === 'signin' ? 'signup' : 'signin'))}
-            className="mt-4 w-full text-center text-xs font-medium text-fg-2 underline-offset-2 hover:text-fg-1 hover:underline"
-          >
-            {mode === 'signup' ? t('authSwitchToSignin') : t('authSwitchToSignup')}
-          </button>
+          <p className="mt-4 w-full text-center text-xs font-medium text-fg-2">
+            <Link to="/signup" className="underline-offset-2 hover:text-fg-1 hover:underline">
+              {t('authSwitchToSignup')}
+            </Link>
+          </p>
         </form>
 
         <p className="text-xs text-fg-4">{t('loginFooter')}</p>

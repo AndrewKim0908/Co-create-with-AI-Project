@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 
 import Layout from '@/components/Layout';
 import LoginPage from '@/pages/LoginPage';
+import Signup from '@/pages/Signup';
 import HubPage from '@/pages/HubPage';
 import TimelinePage from '@/pages/TimelinePage';
 import WorkspacePage from '@/pages/WorkspacePage';
@@ -65,6 +66,10 @@ export default function App() {
       <Route
         path="/"
         element={user ? <Navigate to="/hub" replace /> : <LoginPage />}
+      />
+      <Route
+        path="/signup"
+        element={user ? <Navigate to="/hub" replace /> : <Signup />}
       />
       <Route path="/demo" element={<DemoPage />} />
 

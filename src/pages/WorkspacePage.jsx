@@ -1,80 +1,589 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate, useParams } from 'react-router-dom';
 import Header from '@/components/Header';
 import Icon from '@/components/Icon';
 import { C } from '@/constants/colors';
 import { getProjectById, DEFAULT_PROJECT } from '@/constants/projects';
 import { useLang } from '@/i18n/LangContext';
+import { supabase } from '@/lib/supabase';
+
+/** message-square 실루엣 — 내부 흰색 채움 + 테두리 (커서용) */
+const MARKER_CURSOR_SVG =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" fill="#ffffff" stroke="#3A4A58" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const MARKER_MODE_CURSOR =
+  typeof btoa !== 'undefined'
+    ? `url("data:image/svg+xml;base64,${btoa(MARKER_CURSOR_SVG)}") 2 18, crosshair`
+    : `url("data:image/svg+xml;charset=utf-8,${encodeURIComponent(MARKER_CURSOR_SVG)}") 2 18, crosshair`;
+
+const ZOOM_MIN = 0.2;
+const ZOOM_MAX = 5;
+
+function isEditableKeyboardTarget(target) {
+  if (!target || typeof target !== 'object') return false;
+  const t = target.tagName;
+  if (t === 'INPUT' || t === 'TEXTAREA' || t === 'SELECT') return true;
+  if (target.isContentEditable) return true;
+  return false;
+}
+
+function extractStoragePathFromPublicUrl(url) {
+  if (!url) return '';
+  try {
+    const u = new URL(url);
+    const marker = '/object/public/design-bucket/';
+    const idx = u.pathname.indexOf(marker);
+    if (idx < 0) return '';
+    const encodedPath = u.pathname.slice(idx + marker.length);
+    return decodeURIComponent(encodedPath);
+  } catch {
+    return '';
+  }
+}
+
+function mapDesignFileRow(row) {
+  const imageUrl = row?.file_url || row?.url || '';
+  return {
+    id: row?.id || null,
+    url: imageUrl,
+    storagePath: extractStoragePathFromPublicUrl(imageUrl),
+  };
+}
 
 // ─── Blueprint viewer ────────────────────────────────────────
-function PulsePin({ pin, active, onClick }) {
-  const [hov, setHov] = useState(false);
-  const isConflict = pin.status === 'conflict';
-  const color = isConflict ? C.coral : C.amber;
-  const posMap = {
-    1: { top: 135, left: 120 },
-    2: { top: 71,  left: 230 },
-    3: { top: 208, left: 174 },
-  };
-  const pos = posMap[pin.id];
+function DesignMarker({
+  marker,
+  isPending,
+  draftNote,
+  onDraftChange,
+  onConfirmNote,
+  onCancelPending,
+  onDelete,
+}) {
+  const { lang } = useLang();
+  const rootRef = useRef(null);
+  const anchorRef = useRef(null);
+  const [pendingPopPos, setPendingPopPos] = useState({ left: 0, top: 0 });
+  const [hovered, setHovered] = useState(false);
+  const [deleteMenu, setDeleteMenu] = useState(false);
+  const hasNote = Boolean(marker.note && marker.note.trim());
+  const notePh = lang === 'ko' ? '의견 입력…' : 'Add a note…';
+  const deleteAsk = lang === 'ko' ? '이 마커를 삭제할까요?' : 'Delete this marker?';
+  const deleteBtn = lang === 'ko' ? '삭제' : 'Delete';
+  const cancelBtn = lang === 'ko' ? '취소' : 'Cancel';
+
+  useEffect(() => {
+    if (!deleteMenu) return undefined;
+    function onDocDown(ev) {
+      if (rootRef.current && !rootRef.current.contains(ev.target)) {
+        setDeleteMenu(false);
+      }
+    }
+    document.addEventListener('mousedown', onDocDown);
+    return () => document.removeEventListener('mousedown', onDocDown);
+  }, [deleteMenu]);
+
+  useLayoutEffect(() => {
+    if (!isPending || !anchorRef.current) return undefined;
+    function updatePos() {
+      const el = anchorRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      setPendingPopPos({ left: r.right + 8, top: r.top + r.height / 2 });
+    }
+    updatePos();
+    window.addEventListener('resize', updatePos);
+    window.addEventListener('scroll', updatePos, true);
+    return () => {
+      window.removeEventListener('resize', updatePos);
+      window.removeEventListener('scroll', updatePos, true);
+    };
+  }, [isPending, marker.xPct, marker.yPct]);
+
+  const pendingPopover =
+    isPending &&
+    createPortal(
+      <div
+        data-placement-ui
+        role="dialog"
+        aria-label={notePh}
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          position: 'fixed',
+          left: pendingPopPos.left,
+          top: pendingPopPos.top,
+          transform: 'translateY(-50%)',
+          zIndex: 99999,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          padding: '6px 8px',
+          background: C.white,
+          border: `1px solid ${C.borderSubtle}`,
+          borderRadius: 6,
+          boxShadow: '0 8px 28px rgba(30,42,53,0.18)',
+        }}
+      >
+        <input
+          value={draftNote}
+          onChange={(e) => onDraftChange(e.target.value)}
+          placeholder={notePh}
+          autoFocus
+          style={{
+            width: 140,
+            fontSize: 11,
+            padding: '4px 6px',
+            border: `1px solid ${C.border}`,
+            borderRadius: 4,
+            outline: 'none',
+            fontFamily: 'inherit',
+            color: C.fg1,
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              onConfirmNote();
+            }
+          }}
+        />
+        <button
+          type="button"
+          onClick={onConfirmNote}
+          style={{
+            padding: '4px 8px',
+            fontSize: 10,
+            fontWeight: 600,
+            borderRadius: 4,
+            border: 'none',
+            background: C.emerald,
+            color: '#fff',
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+          }}
+        >
+          {lang === 'ko' ? '확인' : 'OK'}
+        </button>
+        <button
+          type="button"
+          onClick={onCancelPending}
+          style={{
+            padding: '4px 6px',
+            fontSize: 10,
+            borderRadius: 4,
+            border: `1px solid ${C.border}`,
+            background: C.subtle,
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+            color: C.fg2,
+          }}
+        >
+          {cancelBtn}
+        </button>
+      </div>,
+      document.body,
+    );
 
   return (
     <div
-      onClick={onClick}
-      onMouseEnter={() => setHov(true)}
-      onMouseLeave={() => setHov(false)}
       style={{
-        position: 'absolute', top: pos.top, left: pos.left,
-        cursor: 'pointer', zIndex: 10,
+        position: 'absolute',
+        left: `${marker.xPct}%`,
+        top: `${marker.yPct}%`,
+        width: 0,
+        height: 0,
+        zIndex: deleteMenu ? 50 : 25,
+        pointerEvents: 'none',
       }}
     >
       <div
+        ref={rootRef}
+        data-marker-root
         style={{
-          width: 24, height: 24, borderRadius: '50%',
-          background: color, border: '2px solid white',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 10, fontWeight: 700, color: '#fff',
-          animation: isConflict ? 'pulse-ring 2s ease-out infinite' : 'none',
-          boxShadow: `0 2px 8px ${color}60`,
-          transition: 'transform 120ms',
-          transform: hov || active ? 'scale(1.2)' : 'scale(1)',
+          position: 'absolute',
+          left: 0,
+          top: 0,
+          transform: 'translate(-50%, -50%)',
+          pointerEvents: 'auto',
         }}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
       >
-        {pin.id}
-      </div>
-      {(hov || active) && (
-        <div
-          style={{
-            position: 'absolute', left: 28, top: -4,
-            background: C.fg1, color: '#fff', fontSize: 10, fontWeight: 500,
-            padding: '4px 8px', borderRadius: 4, whiteSpace: 'nowrap',
-            boxShadow: '0 2px 8px rgba(30,42,53,0.2)',
-            animation: 'fadeIn 0.15s ease both',
-          }}
-        >
-          {pin.label} · {pin.title}
+        <div style={{ position: 'relative', width: 14, height: 14 }}>
+          <div
+            ref={anchorRef}
+            data-marker-dot
+            onContextMenu={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              if (isPending) return;
+              setDeleteMenu(true);
+            }}
+            style={{
+              width: 14,
+              height: 14,
+              borderRadius: '50%',
+              background: C.coral,
+              border: '2px solid #fff',
+              boxShadow: '0 1px 4px rgba(208,80,69,0.45)',
+              cursor: isPending ? 'default' : 'pointer',
+            }}
+          />
         </div>
-      )}
+
+        {pendingPopover}
+
+        {!isPending && hasNote ? (
+          <div
+            style={{
+              position: 'absolute',
+              left: 22,
+              top: '50%',
+              transform: 'translateY(-50%)',
+              maxWidth: hovered ? 240 : 0,
+              opacity: hovered ? 1 : 0,
+              overflow: 'hidden',
+              transition:
+                'max-width 0.38s cubic-bezier(0.2, 0, 0, 1), opacity 0.28s ease',
+            }}
+          >
+            <div
+              style={{
+                position: 'relative',
+                minWidth: 0,
+                maxWidth: 220,
+                padding: '8px 10px',
+                background: C.white,
+                border: `1px solid ${C.borderSubtle}`,
+                borderRadius: 8,
+                fontSize: 11,
+                lineHeight: 1.45,
+                color: C.fg2,
+                boxShadow: '0 4px 12px rgba(30,42,53,0.1)',
+                whiteSpace: 'normal',
+              }}
+            >
+              <div
+                style={{
+                  position: 'absolute',
+                  left: -5,
+                  top: '50%',
+                  marginTop: -5,
+                  width: 0,
+                  height: 0,
+                  borderTop: '5px solid transparent',
+                  borderBottom: '5px solid transparent',
+                  borderRight: `5px solid ${C.white}`,
+                  filter: 'drop-shadow(-1px 0 0 rgba(0,0,0,0.06))',
+                }}
+              />
+              {marker.note}
+            </div>
+          </div>
+        ) : null}
+
+        {deleteMenu && !isPending ? (
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position: 'absolute',
+              left: '50%',
+              top: '100%',
+              transform: 'translateX(-50%)',
+              marginTop: 8,
+              padding: '8px 10px',
+              background: C.white,
+              border: `1px solid ${C.borderSubtle}`,
+              borderRadius: 8,
+              boxShadow: '0 8px 24px rgba(30,42,53,0.14)',
+              minWidth: 160,
+            }}
+          >
+            <div style={{ fontSize: 11, fontWeight: 600, color: C.fg1, marginBottom: 8 }}>
+              {deleteAsk}
+            </div>
+            <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                onClick={() => setDeleteMenu(false)}
+                style={{
+                  padding: '4px 10px',
+                  fontSize: 10,
+                  borderRadius: 4,
+                  border: `1px solid ${C.border}`,
+                  background: C.subtle,
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                  color: C.fg2,
+                }}
+              >
+                {cancelBtn}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setDeleteMenu(false);
+                  onDelete();
+                }}
+                style={{
+                  padding: '4px 10px',
+                  fontSize: 10,
+                  fontWeight: 600,
+                  borderRadius: 4,
+                  border: 'none',
+                  background: C.coral,
+                  color: '#fff',
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                }}
+              >
+                {deleteBtn}
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }
 
-function BlueprintViewer({ activePin, onPinClick }) {
-  const { t, lang } = useLang();
-  const pins = [
-    { id: 1, label: 'CF-01', status: 'conflict', title: t('cfTitle') },
-    { id: 2, label: 'CF-02', status: 'pending',  title: 'PCB connector J4' },
-    { id: 3, label: 'CF-03', status: 'conflict', title: lang === 'ko' ? '벽 두께' : lang === 'zh' ? '壁厚' : 'Wall thickness' },
-  ];
+function BlueprintViewer({ designImageUrl, onUploadImage, onDeleteImage, uploadState }) {
+  const { t } = useLang();
+  const canvasRef = useRef(null);
+  const viewportRef = useRef(null);
+  const contextMenuRef = useRef(null);
+  const skipNextMarkerClick = useRef(false);
+  const panSession = useRef(null);
+  const panXRef = useRef(0);
+  const panYRef = useRef(0);
+
+  const [markerMode, setMarkerMode] = useState(false);
+  const [handTool, setHandTool] = useState(false);
+  const [spaceHeld, setSpaceHeld] = useState(false);
+  const [isPanning, setIsPanning] = useState(false);
+  const [zoom, setZoom] = useState(1);
+  const [panX, setPanX] = useState(0);
+  const [panY, setPanY] = useState(0);
+  const [designMarkers, setDesignMarkers] = useState([]);
+  const [pendingMarkerId, setPendingMarkerId] = useState(null);
+  const [draftNote, setDraftNote] = useState('');
+  const [imageMenu, setImageMenu] = useState({ open: false, x: 0, y: 0 });
+
+  useEffect(() => {
+    panXRef.current = panX;
+  }, [panX]);
+  useEffect(() => {
+    panYRef.current = panY;
+  }, [panY]);
+
+  useEffect(() => {
+    const down = (e) => {
+      if (e.code !== 'Space') return;
+      if (isEditableKeyboardTarget(e.target)) return;
+      e.preventDefault();
+      setSpaceHeld(true);
+    };
+    const up = (e) => {
+      if (e.code === 'Space') setSpaceHeld(false);
+    };
+    const blur = () => setSpaceHeld(false);
+    window.addEventListener('keydown', down, true);
+    window.addEventListener('keyup', up, true);
+    window.addEventListener('blur', blur);
+    return () => {
+      window.removeEventListener('keydown', down, true);
+      window.removeEventListener('keyup', up, true);
+      window.removeEventListener('blur', blur);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isPanning) return undefined;
+    const move = (e) => {
+      const s = panSession.current;
+      if (!s) return;
+      const dx = e.clientX - s.x0;
+      const dy = e.clientY - s.y0;
+      if (Math.abs(dx) + Math.abs(dy) > 2) s.moved = true;
+      setPanX(s.px0 + dx);
+      setPanY(s.py0 + dy);
+    };
+    const up = () => {
+      if (panSession.current?.moved) skipNextMarkerClick.current = true;
+      panSession.current = null;
+      setIsPanning(false);
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+    return () => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+    };
+  }, [isPanning]);
+
+  useEffect(() => {
+    if (!imageMenu.open) return undefined;
+    const close = (e) => {
+      if (contextMenuRef.current && contextMenuRef.current.contains(e.target)) return;
+      setImageMenu({ open: false, x: 0, y: 0 });
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [imageMenu.open]);
+
+  function viewportCursor() {
+    if (isPanning) return 'grabbing';
+    if (handTool || spaceHeld) return 'grab';
+    if (markerMode) return MARKER_MODE_CURSOR;
+    return 'default';
+  }
+
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return undefined;
+    const onNativeWheel = (e) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      const rect = el.getBoundingClientRect();
+      const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+      setZoom((prevZ) => {
+        const nz = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, prevZ * factor));
+        if (Math.abs(nz - prevZ) < 1e-9) return prevZ;
+        const ratio = nz / prevZ;
+        const mx = e.clientX - rect.left - rect.width / 2;
+        const my = e.clientY - rect.top - rect.height / 2;
+        setPanX((px) => px - mx * (ratio - 1));
+        setPanY((py) => py - my * (ratio - 1));
+        return nz;
+      });
+    };
+    el.addEventListener('wheel', onNativeWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onNativeWheel);
+  }, []);
+
+  function onViewportMouseDown(e) {
+    if (e.button !== 0) return;
+    if (!handTool && !spaceHeld) return;
+    if (e.target.closest && e.target.closest('[data-marker-root]')) return;
+    if (e.target.closest && e.target.closest('button')) return;
+    panSession.current = {
+      x0: e.clientX,
+      y0: e.clientY,
+      px0: panXRef.current,
+      py0: panYRef.current,
+      moved: false,
+    };
+    setIsPanning(true);
+    e.preventDefault();
+  }
+
+  function zoomByStep(zoomIn) {
+    const factor = zoomIn ? 1.15 : 1 / 1.15;
+    setZoom((prevZ) => {
+      const nz = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, prevZ * factor));
+      if (Math.abs(nz - prevZ) < 1e-9) return prevZ;
+      const r = nz / prevZ;
+      setPanX((p) => p * r);
+      setPanY((p) => p * r);
+      return nz;
+    });
+  }
+
+  function toggleMarkerMode() {
+    if (markerMode) {
+      if (pendingMarkerId) {
+        setDesignMarkers((prev) => prev.filter((m) => m.id !== pendingMarkerId));
+        setPendingMarkerId(null);
+        setDraftNote('');
+      }
+      setMarkerMode(false);
+    } else {
+      setHandTool(false);
+      setMarkerMode(true);
+    }
+  }
+
+  function toggleHandTool() {
+    setHandTool((h) => {
+      const next = !h;
+      if (next) {
+        if (markerMode) {
+          if (pendingMarkerId) {
+            setDesignMarkers((prev) => prev.filter((m) => m.id !== pendingMarkerId));
+            setPendingMarkerId(null);
+            setDraftNote('');
+          }
+          setMarkerMode(false);
+        }
+      }
+      return next;
+    });
+  }
+
+  function handleCanvasClick(e) {
+    if (skipNextMarkerClick.current) {
+      skipNextMarkerClick.current = false;
+      return;
+    }
+    if (!markerMode || handTool) return;
+    if (e.target.closest('[data-marker-root]')) return;
+    const el = canvasRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const xPct = ((e.clientX - rect.left) / rect.width) * 100;
+    const yPct = ((e.clientY - rect.top) / rect.height) * 100;
+    const id = typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `m-${Date.now()}`;
+    setDesignMarkers((prev) => {
+      const next = pendingMarkerId
+        ? prev.filter((m) => m.id !== pendingMarkerId)
+        : prev;
+      return [...next, { id, xPct, yPct, note: '' }];
+    });
+    setPendingMarkerId(id);
+    setDraftNote('');
+  }
+
+  function confirmPendingNote() {
+    if (!pendingMarkerId) return;
+    const text = draftNote.trim();
+    setDesignMarkers((prev) =>
+      prev.map((m) => (m.id === pendingMarkerId ? { ...m, note: text } : m)),
+    );
+    setPendingMarkerId(null);
+    setDraftNote('');
+  }
+
+  function cancelPending() {
+    if (!pendingMarkerId) return;
+    setDesignMarkers((prev) => prev.filter((m) => m.id !== pendingMarkerId));
+    setPendingMarkerId(null);
+    setDraftNote('');
+  }
+
+  const canvasCursor = viewportCursor();
 
   return (
     <div
       style={{
-        flex: 1, background: '#F8FAFC', position: 'relative', overflow: 'hidden',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        flex: 1,
+        background: '#F8FAFC',
+        position: 'relative',
+        overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'column',
+        minWidth: 0,
       }}
     >
-      <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}>
+      <svg
+        style={{
+          position: 'absolute',
+          inset: 0,
+          width: '100%',
+          height: '100%',
+          pointerEvents: 'none',
+        }}
+      >
         <defs>
           <pattern id="smallGrid" width="20" height="20" patternUnits="userSpaceOnUse">
             <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#E2E8ED" strokeWidth="0.5" />
@@ -87,75 +596,288 @@ function BlueprintViewer({ activePin, onPinClick }) {
         <rect width="100%" height="100%" fill="url(#grid)" />
       </svg>
 
-      <div style={{ position: 'relative' }}>
-        <svg
-          width="460" height="340" viewBox="0 0 460 340"
-          style={{ filter: 'drop-shadow(0 8px 32px rgba(30,42,53,0.12))' }}
+      <div
+        ref={viewportRef}
+        onMouseDown={onViewportMouseDown}
+        style={{
+          flex: 1,
+          minHeight: 0,
+          position: 'relative',
+          overflow: 'hidden',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          cursor: viewportCursor(),
+        }}
+      >
+        <div
+          style={{
+            transform: `translate(${panX}px, ${panY}px) scale(${zoom})`,
+            transformOrigin: 'center center',
+            width: 460,
+            height: 340,
+            position: 'relative',
+            flexShrink: 0,
+          }}
         >
-          <rect x="30" y="30" width="400" height="280" rx="4" fill="white" stroke="#3A4A58" strokeWidth="2" />
-          <rect x="55" y="55" width="350" height="230" rx="2" fill="none" stroke="#62788A" strokeWidth="1" strokeDasharray="6,3" />
-          <rect x="70" y="70" width="200" height="140" fill="#EDF7F2" stroke="#1E8A5A" strokeWidth="1.5" />
-          <text x="170" y="145" textAnchor="middle" style={{ fontSize: 9, fill: '#1E8A5A', fontFamily: 'monospace', fontWeight: 600 }}>
-            PCB-A · Rev.3
-          </text>
-          <rect x="255" y="78" width="28" height="14" rx="2" fill="#FEF0CC" stroke="#C88A1A" strokeWidth="1" />
-          <text x="269" y="87" textAnchor="middle" style={{ fontSize: 7, fill: '#7A5500', fontFamily: 'monospace', fontWeight: 600 }}>
-            J4
-          </text>
-          {[0, 1, 2, 3, 4, 5].map((i) => (
-            <rect key={i} x={300 + i * 14} y="70" width="8" height="140" fill="#EAF0F5" stroke="#9BAAB7" strokeWidth="0.8" />
-          ))}
-          <text x="385" y="145" textAnchor="middle" style={{ fontSize: 8, fill: '#62788A', fontFamily: 'monospace' }}>
-            COOLING
-          </text>
-          {[[68, 68], [270, 68], [68, 208], [270, 208]].map(([cx, cy], i) => (
-            <circle
-              key={i}
-              cx={cx}
-              cy={cy}
-              r="5"
-              fill="white"
-              stroke={i === 0 ? C.coral : '#3A4A58'}
-              strokeWidth={i === 0 ? 2 : 1.5}
-            />
-          ))}
-          <rect x="130" y="170" width="60" height="36" rx="2" fill="#EDF7F2" stroke="#1E8A5A" strokeWidth="1" />
-          <text x="160" y="192" textAnchor="middle" style={{ fontSize: 8, fill: '#1E8A5A', fontFamily: 'monospace' }}>
-            THERMAL
-          </text>
-          <line x1="70" y1="240" x2="270" y2="240" stroke="#9BAAB7" strokeWidth="0.8" strokeDasharray="4,2" />
-          <text x="170" y="254" textAnchor="middle" style={{ fontSize: 8, fill: '#9BAAB7', fontFamily: 'monospace' }}>
-            200mm
-          </text>
-          <line x1="290" y1="70" x2="290" y2="210" stroke="#9BAAB7" strokeWidth="0.8" strokeDasharray="4,2" />
-          <text x="302" y="143" style={{ fontSize: 8, fill: '#9BAAB7', fontFamily: 'monospace' }}>
-            140mm
-          </text>
-          <line x1="68" y1="68" x2="100" y2="40" stroke={C.coral} strokeWidth="1" strokeDasharray="3,2" />
-          <rect x="100" y="24" width="96" height="20" rx="2" fill={C.coralLight} stroke={C.coralBorder} strokeWidth="1" />
-          <text x="148" y="37" textAnchor="middle" style={{ fontSize: 8.5, fill: C.coral, fontFamily: 'monospace', fontWeight: 600 }}>
-            ±0.3mm — CONFLICT
-          </text>
-        </svg>
-        {pins.map((pin) => (
-          <PulsePin key={pin.id} pin={pin} active={activePin === pin.id} onClick={() => onPinClick(pin.id)} />
+          <div
+            ref={canvasRef}
+            onClick={handleCanvasClick}
+            style={{
+              position: 'relative',
+              width: 460,
+              height: 340,
+              flexShrink: 0,
+              cursor: canvasCursor,
+            }}
+          >
+        {designImageUrl ? (
+          <img
+            src={designImageUrl}
+            alt="Uploaded design"
+            onContextMenu={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setImageMenu({ open: true, x: e.clientX, y: e.clientY });
+            }}
+            style={{
+              width: 460,
+              height: 340,
+              objectFit: 'contain',
+              background: '#fff',
+              border: `1px solid ${C.borderSubtle}`,
+              borderRadius: 4,
+              boxShadow: '0 8px 32px rgba(30,42,53,0.12)',
+              display: 'block',
+              cursor: canvasCursor,
+            }}
+          />
+        ) : null}
+        {designMarkers.map((m) => (
+          <DesignMarker
+            key={m.id}
+            marker={m}
+            isPending={pendingMarkerId === m.id}
+            draftNote={pendingMarkerId === m.id ? draftNote : ''}
+            onDraftChange={setDraftNote}
+            onConfirmNote={confirmPendingNote}
+            onCancelPending={cancelPending}
+            onDelete={() => {
+              setDesignMarkers((prev) => prev.filter((x) => x.id !== m.id));
+              if (pendingMarkerId === m.id) {
+                setPendingMarkerId(null);
+                setDraftNote('');
+              }
+            }}
+          />
         ))}
+          </div>
+        </div>
+      </div>
+
+      {imageMenu.open && designImageUrl ? (
+        <div
+          ref={contextMenuRef}
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            position: 'fixed',
+            left: imageMenu.x,
+            top: imageMenu.y,
+            transform: 'translate(6px, 6px)',
+            zIndex: 100000,
+            minWidth: 140,
+            background: C.white,
+            border: `1px solid ${C.borderSubtle}`,
+            borderRadius: 8,
+            boxShadow: '0 10px 26px rgba(30,42,53,0.16)',
+            padding: 6,
+          }}
+        >
+          <button
+            type="button"
+            onClick={async () => {
+              setImageMenu({ open: false, x: 0, y: 0 });
+              await onDeleteImage();
+            }}
+            style={{
+              width: '100%',
+              border: 'none',
+              background: 'transparent',
+              textAlign: 'left',
+              borderRadius: 6,
+              padding: '7px 8px',
+              fontSize: 12.5,
+              color: C.coral,
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+            }}
+          >
+            {t('deleteImage')}
+          </button>
+        </div>
+      ) : null}
+
+      <div style={{ position: 'absolute', top: 14, left: 14 }}>
+        <label
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '7px 10px',
+            borderRadius: 4,
+            background: C.white,
+            border: `1px solid ${C.border}`,
+            color: C.fg2,
+            fontSize: 11,
+            fontWeight: 600,
+            cursor: uploadState.status === 'uploading' ? 'not-allowed' : 'pointer',
+            boxShadow: '0 1px 3px rgba(30,42,53,0.08)',
+            opacity: uploadState.status === 'uploading' ? 0.75 : 1,
+          }}
+        >
+          <Icon name="upload" size={13} color={C.fg3} />
+          {uploadState.status === 'uploading' ? t('hubCreateSaving') : 'Upload Design'}
+          <input
+            type="file"
+            accept="image/*"
+            style={{ display: 'none' }}
+            onChange={onUploadImage}
+            disabled={uploadState.status === 'uploading'}
+          />
+        </label>
+        {uploadState.message ? (
+          <div
+            style={{
+              marginTop: 6,
+              fontSize: 10,
+              color: uploadState.status === 'error' ? C.coral : C.emerald,
+              background: C.white,
+              border: `1px solid ${uploadState.status === 'error' ? C.coralBorder : C.emeraldBorder}`,
+              borderRadius: 4,
+              padding: '4px 6px',
+              display: 'inline-block',
+            }}
+          >
+            {uploadState.message}
+          </div>
+        ) : null}
       </div>
 
       <div style={{ position: 'absolute', bottom: 16, right: 16, display: 'flex', gap: 4 }}>
-        {['zoom-in', 'zoom-out', 'maximize-2', 'layers'].map((icon) => (
-          <button
-            key={icon}
-            style={{
-              width: 30, height: 30, borderRadius: 4,
-              background: C.white, border: `1px solid ${C.border}`,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              cursor: 'pointer', boxShadow: '0 1px 3px rgba(30,42,53,0.08)',
-            }}
-          >
-            <Icon name={icon} size={13} color={C.fg3} />
-          </button>
-        ))}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            toggleMarkerMode();
+          }}
+          title={markerMode ? '마킹 끄기' : '마킹 켜기'}
+          style={{
+            width: 30,
+            height: 30,
+            borderRadius: 4,
+            background: C.white,
+            border: `1px solid ${markerMode ? C.coralBorder : C.border}`,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            boxShadow: markerMode
+              ? '0 1px 6px rgba(208,80,69,0.2)'
+              : '0 1px 3px rgba(30,42,53,0.08)',
+          }}
+        >
+          <Icon
+            name="message-square"
+            size={13}
+            color={markerMode ? C.coral : C.fg3}
+          />
+        </button>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            zoomByStep(true);
+          }}
+          title="Zoom in (Ctrl+wheel)"
+          style={{
+            width: 30,
+            height: 30,
+            borderRadius: 4,
+            background: C.white,
+            border: `1px solid ${C.border}`,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            boxShadow: '0 1px 3px rgba(30,42,53,0.08)',
+          }}
+        >
+          <Icon name="zoom-in" size={13} color={C.fg3} />
+        </button>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            zoomByStep(false);
+          }}
+          title="Zoom out (Ctrl+wheel)"
+          style={{
+            width: 30,
+            height: 30,
+            borderRadius: 4,
+            background: C.white,
+            border: `1px solid ${C.border}`,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            boxShadow: '0 1px 3px rgba(30,42,53,0.08)',
+          }}
+        >
+          <Icon name="zoom-out" size={13} color={C.fg3} />
+        </button>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            toggleHandTool();
+          }}
+          title={handTool ? 'Hand tool off' : 'Hand tool (pan)'}
+          style={{
+            width: 30,
+            height: 30,
+            borderRadius: 4,
+            background: C.white,
+            border: `1px solid ${handTool ? C.emeraldBorder : C.border}`,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            boxShadow: handTool
+              ? '0 1px 6px rgba(30,138,90,0.2)'
+              : '0 1px 3px rgba(30,42,53,0.08)',
+          }}
+        >
+          <Icon name="hand" size={13} color={handTool ? C.emerald : C.fg3} />
+        </button>
+        <button
+          type="button"
+          title="Layers"
+          style={{
+            width: 30,
+            height: 30,
+            borderRadius: 4,
+            background: C.white,
+            border: `1px solid ${C.border}`,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            boxShadow: '0 1px 3px rgba(30,42,53,0.08)',
+          }}
+        >
+          <Icon name="layers" size={13} color={C.fg3} />
+        </button>
       </div>
 
       <div
@@ -172,24 +894,165 @@ function BlueprintViewer({ activePin, onPinClick }) {
 }
 
 // ─── Chat panel ──────────────────────────────────────────────
-function ChatPanel() {
+function ChatPanel({ projectId, senderRole = 'engineer' }) {
   const { t, lang } = useLang();
   const [input, setInput] = useState('');
+  const [messages, setMessages] = useState([]);
+  const [sendState, setSendState] = useState({ status: 'idle', message: '' });
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteState, setInviteState] = useState({ status: 'idle', message: '' });
+  const [currentUserEmail, setCurrentUserEmail] = useState('');
   const scrollRef = useRef(null);
 
-  const messages = [
-    { type: 'system', text: t('chatSys1') },
-    { type: 'user',   name: 'Andrew Kim',  role: lang === 'ko' ? '디자이너' : lang === 'zh' ? '设计师' : 'Designer', initials: 'AK', color: '#3A6EA5', text: t('chatMsg1') },
-    { type: 'user',   name: 'Lee Sungmin', role: lang === 'ko' ? '엔지니어' : lang === 'zh' ? '工程师' : 'Engineer', initials: 'LS', color: C.emerald,  text: t('chatMsg2') },
-    { type: 'user',   name: 'Andrew Kim',  role: lang === 'ko' ? '디자이너' : lang === 'zh' ? '设计师' : 'Designer', initials: 'AK', color: '#3A6EA5', text: t('chatMsg3') },
-    { type: 'system', text: t('chatDeadlock') },
-    { type: 'ai',     text: t('chatAI1') },
-    { type: 'ai',     isOptionC: true, text: t('chatOptionC') },
-  ];
+  useEffect(() => {
+    let alive = true;
+    async function loadCurrentUser() {
+      const { data } = await supabase.auth.getUser();
+      if (!alive) return;
+      setCurrentUserEmail(data?.user?.email || '');
+    }
+    loadCurrentUser();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    async function loadMessages() {
+      let base = supabase
+        .from('messages')
+        .select('id, content, sender_role, sender_email, created_at, project_id')
+        .order('created_at', { ascending: true })
+        .limit(200);
+
+      let query = projectId ? base.eq('project_id', projectId) : base;
+      let { data, error } = await query;
+
+      // Fallback: table without project_id column.
+      if (error && /project_id/i.test(error.message || '')) {
+        base = supabase
+          .from('messages')
+          .select('id, content, sender_role, created_at')
+          .order('created_at', { ascending: true })
+          .limit(200);
+        ({ data, error } = await base);
+      }
+
+      if (error) {
+        setSendState({ status: 'error', message: error.message || 'Failed to load messages.' });
+        return;
+      }
+      setMessages(data || []);
+    }
+
+    loadMessages();
+
+    const channel = supabase
+      .channel(`messages-realtime-${projectId || 'global'}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'messages' },
+        (payload) => {
+          const next = payload.new || {};
+          if (projectId && String(next.project_id) !== String(projectId)) return;
+          setMessages((prev) => [...prev, next]);
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [projectId]);
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [lang]);
+  }, [messages, lang]);
+
+  async function onSendMessage() {
+    const content = input.trim();
+    if (!content) return;
+
+    setSendState({ status: 'sending', message: '' });
+
+    let { error } = await supabase.from('messages').insert({
+      content,
+      sender_role: senderRole,
+      sender_email: currentUserEmail || null,
+      project_id: projectId || null,
+    });
+
+    // Fallback when project_id column doesn't exist.
+    if (error && /project_id/i.test(error.message || '')) {
+      const fallback = await supabase.from('messages').insert({
+        content,
+        sender_role: senderRole,
+        sender_email: currentUserEmail || null,
+      });
+      error = fallback.error;
+    }
+    // Fallback when sender_email column doesn't exist.
+    if (error && /sender_email/i.test(error.message || '')) {
+      let fallback = await supabase.from('messages').insert({
+        content,
+        sender_role: senderRole,
+        project_id: projectId || null,
+      });
+      error = fallback.error;
+      if (error && /project_id/i.test(error.message || '')) {
+        fallback = await supabase.from('messages').insert({
+          content,
+          sender_role: senderRole,
+        });
+        error = fallback.error;
+      }
+    }
+
+    if (error) {
+      setSendState({ status: 'error', message: error.message || 'Message send failed.' });
+      return;
+    }
+
+    setInput('');
+    setSendState({ status: 'success', message: 'Sent' });
+    setTimeout(() => setSendState({ status: 'idle', message: '' }), 1200);
+  }
+
+  async function handleInvite(email) {
+    const normalized = (email || '').trim().toLowerCase();
+    if (!normalized || !projectId) return false;
+    const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized);
+    if (!isEmail) {
+      setInviteState({ status: 'error', message: t('inviteInvalidEmail') });
+      return false;
+    }
+
+    const { data: authData } = await supabase.auth.getUser();
+    const inviterId = authData?.user?.id || null;
+    if (!inviterId) {
+      setInviteState({ status: 'error', message: t('inviteAuthRequired') });
+      return false;
+    }
+
+    setInviteState({ status: 'saving', message: '' });
+    const { error } = await supabase.from('project_members').insert({
+      project_id: projectId,
+      invited_email: normalized,
+      status: 'pending',
+      invited_by: inviterId,
+    });
+    if (error) {
+      if (String(error.code) === '23505' || /duplicate|unique/i.test(error.message || '')) {
+        setInviteState({ status: 'error', message: t('alreadyInvited') });
+        return false;
+      }
+      setInviteState({ status: 'error', message: error.message || t('inviteFailed') });
+      return false;
+    }
+    setInviteState({ status: 'success', message: t('inviteSent') });
+    return true;
+  }
 
   return (
     <div
@@ -207,16 +1070,26 @@ function ChatPanel() {
         }}
       >
         <Icon name="message-square" size={13} color={C.fg3} />
-        <span style={{ fontSize: 11, fontWeight: 600, color: C.fg2 }}>{t('aiMediation')}</span>
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4 }}>
-          <div
-            style={{
-              width: 6, height: 6, borderRadius: '50%',
-              background: C.emerald, animation: 'pulse-dot 2s infinite',
-            }}
-          />
-          <span style={{ fontSize: 10, color: C.fg3 }}>{t('live')}</span>
-        </div>
+        <span style={{ fontSize: 11, fontWeight: 600, color: C.fg2 }}>{t('chatLabel')}</span>
+        <button
+          type="button"
+          onClick={() => setInviteOpen(true)}
+          style={{
+            marginLeft: 'auto',
+            height: 24,
+            borderRadius: 999,
+            border: `1px solid ${C.emerald}`,
+            background: '#fff',
+            color: C.emerald,
+            fontSize: 10,
+            fontWeight: 600,
+            padding: '0 10px',
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+          }}
+        >
+          {t('invite')}
+        </button>
       </div>
 
       <div
@@ -226,90 +1099,68 @@ function ChatPanel() {
           display: 'flex', flexDirection: 'column', gap: 8,
         }}
       >
-        {messages.map((msg, i) => {
-          if (msg.type === 'system') {
-            return (
-              <div
-                key={i}
-                style={{ textAlign: 'center', fontSize: 10, color: C.fg4, padding: '2px 0' }}
-              >
-                {msg.text}
-              </div>
-            );
-          }
-          if (msg.type === 'user') {
-            return (
-              <div key={i} style={{ display: 'flex', gap: 6 }}>
+        {messages.length === 0 ? (
+          <div style={{ textAlign: 'center', fontSize: 10, color: C.fg4, padding: '8px 0' }}>
+            {t('chatSys1')}
+          </div>
+        ) : messages.map((msg) => {
+          const senderEmail = msg.sender_email || '';
+          const emailPrefix = senderEmail.includes('@') ? senderEmail.split('@')[0] : '';
+          const mePrefix = currentUserEmail.includes('@') ? currentUserEmail.split('@')[0] : '';
+          const isMine = Boolean(mePrefix && emailPrefix && mePrefix === emailPrefix);
+          const name = emailPrefix || (lang === 'ko' ? '사용자' : lang === 'zh' ? '用户' : 'User');
+          const avatarBg = isMine ? C.emerald : '#3A6EA5';
+          const text = msg.content || '';
+
+          return (
+            <div
+              key={msg.id || `${msg.created_at}-${text}`}
+              style={{ display: 'flex', gap: 6, justifyContent: isMine ? 'flex-end' : 'flex-start' }}
+            >
+              {!isMine ? (
                 <div
                   style={{
                     width: 22, height: 22, borderRadius: 3,
-                    background: msg.color, color: '#fff',
-                    fontSize: 9, fontWeight: 700,
+                    background: avatarBg,
+                    color: '#fff', fontSize: 9, fontWeight: 700,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     flexShrink: 0,
+                    textTransform: 'uppercase',
                   }}
                 >
-                  {msg.initials}
+                  {(name || 'U').slice(0, 2)}
                 </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 10, fontWeight: 600, color: C.fg2, marginBottom: 2 }}>
-                    {msg.name}{' '}
-                    <span style={{ fontWeight: 400, color: C.fg4 }}>· {msg.role}</span>
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 11, color: C.fg2, lineHeight: 1.5,
-                      background: C.subtle, padding: '6px 8px',
-                      borderRadius: '0 5px 5px 5px',
-                      border: `1px solid ${C.borderSubtle}`,
-                    }}
-                  >
-                    {msg.text}
-                  </div>
-                </div>
-              </div>
-            );
-          }
-          // ai
-          return (
-            <div key={i} style={{ display: 'flex', gap: 6 }}>
-              <div
-                style={{
-                  width: 22, height: 22, borderRadius: 3,
-                  background: 'linear-gradient(135deg,#1E8A5A,#25A46C)',
-                  color: '#fff', fontSize: 9, fontWeight: 700,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  flexShrink: 0,
-                }}
-              >
-                AI
-              </div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 10, fontWeight: 600, color: C.emerald, marginBottom: 2 }}>
-                  Co-Create AI
+              ) : null}
+              <div style={{ maxWidth: '78%', display: 'flex', flexDirection: 'column', alignItems: isMine ? 'flex-end' : 'flex-start' }}>
+                <div style={{ fontSize: 10, fontWeight: 600, color: C.fg2, marginBottom: 2 }}>
+                  {name}
                 </div>
                 <div
                   style={{
-                    fontSize: 11, color: msg.isOptionC ? C.fg1 : C.fg2, lineHeight: 1.5,
-                    background: msg.isOptionC ? C.emeraldLight : C.subtle,
-                    padding: '6px 8px', borderRadius: '0 5px 5px 5px',
-                    border: `1px solid ${msg.isOptionC ? C.emeraldBorder : C.borderSubtle}`,
-                    animation: msg.isOptionC ? 'fadeIn 0.4s ease both' : 'none',
+                    fontSize: 11, color: C.fg2, lineHeight: 1.5,
+                    background: isMine ? C.emeraldLight : C.subtle,
+                    padding: '6px 8px',
+                    borderRadius: isMine ? '5px 0 5px 5px' : '0 5px 5px 5px',
+                    border: `1px solid ${isMine ? C.emeraldBorder : C.borderSubtle}`,
                   }}
                 >
-                  {msg.isOptionC && (
-                    <div
-                      style={{
-                        fontSize: 10, fontWeight: 700, color: C.emerald,
-                        marginBottom: 3, display: 'flex', alignItems: 'center', gap: 4,
-                      }}
-                    >
-                      <Icon name="sparkles" size={11} color={C.emerald} /> {t('optionCProposed')}
-                    </div>
-                  )}
-                  {msg.text}
+                  {text}
                 </div>
               </div>
+              {isMine ? (
+                <div
+                  style={{
+                    width: 22, height: 22, borderRadius: 3,
+                    background: avatarBg,
+                    color: '#fff', fontSize: 9, fontWeight: 700,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    flexShrink: 0,
+                    textTransform: 'uppercase',
+                  }}
+                >
+                  {(name || 'U').slice(0, 2)}
+                </div>
+              ) : null}
             </div>
           );
         })}
@@ -320,6 +1171,12 @@ function ChatPanel() {
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                onSendMessage();
+              }
+            }}
             placeholder={t('addComment')}
             style={{
               flex: 1, fontSize: 11, padding: '6px 8px',
@@ -329,6 +1186,8 @@ function ChatPanel() {
             }}
           />
           <button
+            type="button"
+            onClick={onSendMessage}
             style={{
               width: 28, height: 28, borderRadius: 4,
               background: C.emerald, border: 'none',
@@ -339,7 +1198,123 @@ function ChatPanel() {
             <Icon name="send" size={12} color="#fff" />
           </button>
         </div>
+        {sendState.message ? (
+          <div
+            style={{
+              marginTop: 5,
+              fontSize: 10,
+              color: sendState.status === 'error' ? C.coral : C.emerald,
+            }}
+          >
+            {sendState.message}
+          </div>
+        ) : null}
       </div>
+      {inviteOpen ? (
+        <div
+          role="presentation"
+          onClick={() => setInviteOpen(false)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(19,28,36,0.42)',
+            zIndex: 70,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 16,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: '100%',
+              maxWidth: 360,
+              background: C.white,
+              border: `1px solid ${C.borderSubtle}`,
+              borderRadius: 8,
+              boxShadow: '0 20px 48px rgba(19,28,36,0.26)',
+              padding: 16,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 10,
+            }}
+          >
+            <div style={{ fontSize: 14, fontWeight: 700, color: C.fg1 }}>{t('invite')}</div>
+            <input
+              type="email"
+              value={inviteEmail}
+              onChange={(e) => setInviteEmail(e.target.value)}
+              placeholder={t('inviteEmailPlaceholder')}
+              style={{
+                border: `1px solid ${C.border}`,
+                borderRadius: 4,
+                height: 34,
+                padding: '0 10px',
+                fontSize: 12,
+                color: C.fg1,
+                fontFamily: 'inherit',
+              }}
+            />
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button
+                type="button"
+                onClick={() => setInviteOpen(false)}
+                style={{
+                  height: 30,
+                  borderRadius: 4,
+                  border: `1px solid ${C.border}`,
+                  background: C.white,
+                  color: C.fg2,
+                  padding: '0 10px',
+                  cursor: 'pointer',
+                  fontSize: 12,
+                  fontFamily: 'inherit',
+                }}
+              >
+                {lang === 'ko' ? '취소' : lang === 'zh' ? '取消' : 'Cancel'}
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  const ok = await handleInvite(inviteEmail);
+                  if (ok) {
+                    setTimeout(() => {
+                      setInviteOpen(false);
+                      setInviteEmail('');
+                      setInviteState({ status: 'idle', message: '' });
+                    }, 700);
+                  }
+                }}
+                style={{
+                  height: 30,
+                  borderRadius: 4,
+                  border: 'none',
+                  background: C.emerald,
+                  color: '#fff',
+                  padding: '0 10px',
+                  cursor: 'pointer',
+                  fontSize: 12,
+                  fontFamily: 'inherit',
+                  fontWeight: 600,
+                }}
+              >
+                {t('sendInvite')}
+              </button>
+            </div>
+            {inviteState.message ? (
+              <div
+                style={{
+                  fontSize: 11,
+                  color: inviteState.status === 'error' ? C.coral : C.emerald,
+                }}
+              >
+                {inviteState.message}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -602,21 +1577,425 @@ export default function WorkspacePage() {
   const { t } = useLang();
   const navigate = useNavigate();
   const { projectId } = useParams();
-  const project = getProjectById(projectId) || DEFAULT_PROJECT;
-  const [activePin, setActivePin] = useState(1);
+  const fallbackProject = getProjectById(projectId) || DEFAULT_PROJECT;
+  const [projectMeta, setProjectMeta] = useState(null);
+  const [savingMeta, setSavingMeta] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [editingSprint, setEditingSprint] = useState(false);
+  const [editingDescription, setEditingDescription] = useState(false);
+  const [nameDraft, setNameDraft] = useState('');
+  const [sprintDraft, setSprintDraft] = useState('');
+  const [descriptionDraft, setDescriptionDraft] = useState('');
+  const [designImage, setDesignImage] = useState({ id: null, url: '', storagePath: '' });
+  const [uploadState, setUploadState] = useState({ status: 'idle', message: '' });
+
+  useEffect(() => {
+    let alive = true;
+
+    async function loadProjectMeta() {
+      if (!projectId) {
+        setProjectMeta(null);
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('projects')
+        .select('id, name, description, status, progress, sprint_number')
+        .eq('id', projectId)
+        .single();
+
+      console.log('[WorkspacePage] raw query result', data, error);
+
+      if (!alive) return;
+      if (error || !data) {
+        setProjectMeta(null);
+        return;
+      }
+      setProjectMeta(data);
+    }
+
+    loadProjectMeta();
+    return () => {
+      alive = false;
+    };
+  }, [projectId]);
+
+  const resolvedProject = {
+    ...fallbackProject,
+    ...(projectMeta || {}),
+  };
+  const normalizedStatus = String(projectMeta?.status || fallbackProject.status || '')
+    .toLowerCase()
+    .trim();
+
+  useEffect(() => {
+    setNameDraft(projectMeta?.name || fallbackProject.name || '');
+    setSprintDraft(String(projectMeta?.sprint_number ?? fallbackProject.sprint ?? ''));
+    setDescriptionDraft(projectMeta?.description || '');
+  }, [projectMeta, fallbackProject.name, fallbackProject.sprint]);
+
+  useEffect(() => {
+    if (!projectId) return undefined;
+    const channel = supabase
+      .channel(`workspace-project-meta-${projectId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'projects', filter: `id=eq.${projectId}` },
+        (payload) => {
+          const next = payload.new || null;
+          if (next) {
+            setProjectMeta((prev) => ({ ...(prev || {}), ...next }));
+          }
+        },
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [projectId]);
+
+  async function updateProjectFields(patch) {
+    if (!projectId || !patch || Object.keys(patch).length === 0) return;
+    const normalizedPatch = {
+      ...patch,
+      ...(typeof patch.status === 'string'
+        ? { status: patch.status.toLowerCase() }
+        : {}),
+    };
+    setSavingMeta(true);
+    const { data, error } = await supabase
+      .from('projects')
+      .update(normalizedPatch)
+      .eq('id', projectId)
+      .select('id, name, description, status, progress, sprint_number')
+      .single();
+    setSavingMeta(false);
+    if (error) {
+      // eslint-disable-next-line no-console
+      console.error('[WorkspacePage] project update failed', error);
+      return;
+    }
+    setProjectMeta((prev) => ({ ...(prev || {}), ...(data || normalizedPatch) }));
+  }
+
+  async function commitNameEdit() {
+    if (!editingName) return;
+    setEditingName(false);
+    const nextName = nameDraft.trim();
+    const currentName = projectMeta?.name || fallbackProject.name || '';
+    if (!nextName || nextName === currentName) return;
+    await updateProjectFields({ name: nextName });
+  }
+
+  async function commitSprintEdit() {
+    if (!editingSprint) return;
+    setEditingSprint(false);
+    const parsed = Number.parseInt(sprintDraft, 10);
+    if (Number.isNaN(parsed)) {
+      setSprintDraft(String(projectMeta?.sprint_number ?? fallbackProject.sprint ?? ''));
+      return;
+    }
+    const currentSprint = Number(projectMeta?.sprint_number ?? fallbackProject.sprint ?? 0);
+    if (parsed === currentSprint) return;
+    await updateProjectFields({ sprint_number: parsed });
+  }
+
+  async function commitDescriptionEdit() {
+    if (!editingDescription) return;
+    setEditingDescription(false);
+    const nextDescription = descriptionDraft.trim();
+    const currentDescription = (projectMeta?.description || '').trim();
+    if (nextDescription === currentDescription) return;
+    await updateProjectFields({ description: nextDescription });
+  }
+
+  useEffect(() => {
+    async function loadLatestDesign() {
+      let base = supabase
+        .from('design_files')
+        .select('id, file_url, created_at, project_id')
+        .order('created_at', { ascending: false })
+        .limit(1);
+      let query = projectId ? base.eq('project_id', projectId) : base;
+      let { data, error } = await query;
+      if (error && /project_id/i.test(error.message || '')) {
+        base = supabase
+          .from('design_files')
+          .select('id, file_url, created_at')
+          .order('created_at', { ascending: false })
+          .limit(1);
+        ({ data, error } = await base);
+      }
+      if (error) return;
+      const row = data?.[0];
+      setDesignImage(mapDesignFileRow(row));
+    }
+
+    loadLatestDesign();
+
+    const channel = supabase
+      .channel(`design-files-realtime-${projectId || 'global'}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'design_files' },
+        (payload) => {
+          const next = payload.new || {};
+          if (projectId && String(next.project_id) !== String(projectId)) return;
+          const nextUrl = next.file_url || next.url;
+          if (nextUrl) setDesignImage(mapDesignFileRow(next));
+        },
+      )
+      .on(
+        'postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'design_files' },
+        (payload) => {
+          const prev = payload.old || {};
+          if (projectId && String(prev.project_id) !== String(projectId)) return;
+          const deletedId = prev.id || null;
+          setDesignImage((curr) => {
+            if (!curr.url) return curr;
+            if (deletedId && curr.id && String(curr.id) === String(deletedId)) {
+              return { id: null, url: '', storagePath: '' };
+            }
+            return curr;
+          });
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [projectId]);
+
+  async function onUploadImage(e) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    setUploadState({ status: 'uploading', message: '' });
+    const filePath = `${projectId || 'global'}/${Date.now()}-${file.name}`;
+    const { error: uploadError } = await supabase.storage
+      .from('design-bucket')
+      .upload(filePath, file, { upsert: true });
+
+    if (uploadError) {
+      setUploadState({ status: 'error', message: uploadError.message || 'Upload failed.' });
+      return;
+    }
+
+    const { data } = supabase.storage.from('design-bucket').getPublicUrl(filePath);
+    const publicUrl = data?.publicUrl || '';
+    if (!publicUrl) {
+      setUploadState({ status: 'error', message: 'Public URL generation failed.' });
+      return;
+    }
+
+    let { error } = await supabase.from('design_files').insert({
+      file_url: publicUrl,
+      file_name: file.name,
+      project_id: projectId || null,
+    });
+
+    // Fallback when table uses `url` instead of `file_url`.
+    if (error && /file_url/i.test(error.message || '')) {
+      const fallback = await supabase.from('design_files').insert({
+        url: publicUrl,
+        file_name: file.name,
+        project_id: projectId || null,
+      });
+      error = fallback.error;
+    }
+    if (error && /project_id/i.test(error.message || '')) {
+      const fallback = await supabase.from('design_files').insert({
+        file_url: publicUrl,
+        file_name: file.name,
+      });
+      error = fallback.error;
+    }
+
+    if (error) {
+      setUploadState({ status: 'error', message: error.message || 'Metadata save failed.' });
+      return;
+    }
+
+    setDesignImage({ id: null, url: publicUrl, storagePath: filePath });
+    setUploadState({ status: 'success', message: 'Design uploaded.' });
+    setTimeout(() => setUploadState({ status: 'idle', message: '' }), 1800);
+  }
+
+  async function onDeleteImage() {
+    if (!designImage.url) return;
+    setUploadState({ status: 'uploading', message: '' });
+
+    let storageError = null;
+    if (designImage.storagePath) {
+      const { error } = await supabase
+        .storage
+        .from('design-bucket')
+        .remove([designImage.storagePath]);
+      storageError = error;
+    }
+
+    let dbError = null;
+    if (designImage.id) {
+      const { error } = await supabase.from('design_files').delete().eq('id', designImage.id);
+      dbError = error;
+    } else {
+      let resp = await supabase.from('design_files').delete().eq('file_url', designImage.url);
+      dbError = resp.error;
+      if (dbError && /file_url/i.test(dbError.message || '')) {
+        resp = await supabase.from('design_files').delete().eq('url', designImage.url);
+        dbError = resp.error;
+      }
+    }
+
+    if (storageError || dbError) {
+      setUploadState({
+        status: 'error',
+        message: dbError?.message || storageError?.message || 'Delete failed.',
+      });
+      return;
+    }
+
+    setDesignImage({ id: null, url: '', storagePath: '' });
+    setUploadState({ status: 'success', message: 'Image deleted.' });
+    setTimeout(() => setUploadState({ status: 'idle', message: '' }), 1500);
+  }
 
   return (
     <>
       <Header
-        title={`${t('sprintLabel')} #${project.sprint} — ${project.name}`}
-        subtitle={t('workspaceSub')}
-        status="deadlock"
+        title={
+          editingName ? (
+            <input
+              value={nameDraft}
+              onChange={(e) => setNameDraft(e.target.value)}
+              onBlur={commitNameEdit}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  commitNameEdit();
+                } else if (e.key === 'Escape') {
+                  setEditingName(false);
+                  setNameDraft(projectMeta?.name || fallbackProject.name || '');
+                }
+              }}
+              autoFocus
+              style={{
+                fontSize: 14,
+                fontWeight: 600,
+                color: C.fg1,
+                border: `1px solid ${C.border}`,
+                borderRadius: 4,
+                padding: '2px 6px',
+                fontFamily: 'inherit',
+                minWidth: 180,
+              }}
+            />
+          ) : (
+            <span
+              onClick={() => setEditingName(true)}
+              title="Click to edit title"
+              style={{ cursor: 'text' }}
+            >
+              {projectMeta?.name || fallbackProject.name}
+            </span>
+          )
+        }
+        subtitle={
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            {editingSprint ? (
+              <input
+                type="number"
+                min={0}
+                value={sprintDraft}
+                onChange={(e) => setSprintDraft(e.target.value)}
+                onBlur={commitSprintEdit}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    commitSprintEdit();
+                  } else if (e.key === 'Escape') {
+                    setEditingSprint(false);
+                    setSprintDraft(String(projectMeta?.sprint_number ?? fallbackProject.sprint ?? ''));
+                  }
+                }}
+                autoFocus
+                style={{
+                  width: 90,
+                  fontSize: 11,
+                  color: C.fg2,
+                  border: `1px solid ${C.border}`,
+                  borderRadius: 4,
+                  padding: '1px 6px',
+                  fontFamily: 'inherit',
+                }}
+              />
+            ) : (
+              <span
+                onClick={() => setEditingSprint(true)}
+                title="Click to edit sprint"
+                style={{ cursor: 'text' }}
+              >
+                Sprint #{projectMeta?.sprint_number ?? fallbackProject.sprint ?? 0}
+              </span>
+            )}
+            <span aria-hidden="true">·</span>
+            {editingDescription ? (
+              <input
+                value={descriptionDraft}
+                onChange={(e) => setDescriptionDraft(e.target.value)}
+                onBlur={commitDescriptionEdit}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    commitDescriptionEdit();
+                  } else if (e.key === 'Escape') {
+                    setEditingDescription(false);
+                    setDescriptionDraft(projectMeta?.description || '');
+                  }
+                }}
+                autoFocus
+                placeholder={t('projectDescriptionPlaceholder')}
+                style={{
+                  width: 360,
+                  maxWidth: '55vw',
+                  fontSize: 11,
+                  color: C.fg2,
+                  border: `1px solid ${C.border}`,
+                  borderRadius: 4,
+                  padding: '1px 7px',
+                  fontFamily: 'inherit',
+                }}
+              />
+            ) : (
+              <span
+                onClick={() => setEditingDescription(true)}
+                title="Click to edit description"
+                style={{
+                  cursor: 'text',
+                  color: (projectMeta?.description || '').trim() ? undefined : C.fg4,
+                }}
+              >
+                {(projectMeta?.description || '').trim() || t('projectDescriptionPlaceholder')}
+                {savingMeta ? ' · Saving...' : ''}
+              </span>
+            )}
+          </span>
+        }
+        status={normalizedStatus || undefined}
       />
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-        <BlueprintViewer activePin={activePin} onPinClick={setActivePin} />
-        <ChatPanel />
+      <div style={{ flex: 1, display: 'flex', overflow: 'hidden', minWidth: 0 }}>
+        <BlueprintViewer
+          designImageUrl={designImage.url}
+          onUploadImage={onUploadImage}
+          onDeleteImage={onDeleteImage}
+          uploadState={uploadState}
+        />
+        <ChatPanel projectId={projectId} senderRole="engineer" />
         <ConflictPanel
-          onApprove={() => navigate(`/project/${project.id}/consensus`)}
+          onApprove={() => navigate(`/project/${resolvedProject.id}/consensus`)}
           onReject={() => {}}
         />
       </div>

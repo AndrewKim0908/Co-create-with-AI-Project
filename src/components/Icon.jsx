@@ -3,7 +3,7 @@ import {
   Settings, HelpCircle, ChevronsUpDown, ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
   Cpu, PenTool, UserCheck, UserPlus, ArrowRight, Check, X, Plus, Sparkles,
   MessageSquare, Send, Loader, CheckCircle, XCircle, FileText,
-  Download, ZoomIn, ZoomOut, Maximize2, Layers, Eye, EyeOff, Mail, Lock,
+  Download, ZoomIn, ZoomOut, Maximize2, Layers, Eye, EyeOff, Mail, Lock, House, MoreVertical, Upload, Hand,
   Thermometer, Palette, Shield, ClipboardCheck, Package, Hammer, Search, Briefcase,
 } from 'lucide-react';
 
@@ -54,6 +54,10 @@ const MAP = {
   'eye-off': EyeOff,
   mail: Mail,
   lock: Lock,
+  home: House,
+  'more-vertical': MoreVertical,
+  upload: Upload,
+  hand: Hand,
 };
 
 export default function Icon({ name, size = 16, color, style = {}, className = '' }) {
