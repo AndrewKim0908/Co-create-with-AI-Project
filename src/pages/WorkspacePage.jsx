@@ -2187,17 +2187,65 @@ function ConflictPanel({
 
   useEffect(() => {
     if (!projectId) return undefined;
+
+    const filterSql = `project_id=eq.${projectId}`;
+    let channelReady = false;
+
+    const invalidateVotes = async (why, payload) => {
+      const row = payload?.new || payload?.old;
+      // eslint-disable-next-line no-console
+      console.log('[ConflictPanel] realtime → loadVotes()', {
+        why,
+        projectIdFilter: filterSql,
+        payloadEventType: payload?.eventType ?? payload?.event ?? null,
+        rowSnapshot: row
+          ? {
+              user_id: row.user_id,
+              sprint_number: row.sprint_number,
+              vote: row.vote,
+              project_id: row.project_id,
+            }
+          : null,
+      });
+      try {
+        await loadVotes();
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('[ConflictPanel] loadVotes after realtime failed', err);
+      }
+    };
+
     const channel = supabase
       .channel(`sprint-votes-${projectId}`)
       .on(
         'postgres_changes',
         {
-          event: '*',
+          event: 'INSERT',
           schema: 'public',
           table: 'sprint_votes',
-          filter: `project_id=eq.${projectId}`,
+          filter: filterSql,
         },
-        () => loadVotes(),
+        (payload) => invalidateVotes('INSERT', payload),
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'sprint_votes',
+          filter: filterSql,
+        },
+        (payload) => invalidateVotes('UPDATE', payload),
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'DELETE',
+          schema: 'public',
+          table: 'sprint_votes',
+          filter: filterSql,
+        },
+        (payload) => invalidateVotes('DELETE', payload),
       )
       .on(
         'postgres_changes',
@@ -2205,13 +2253,33 @@ function ConflictPanel({
           event: '*',
           schema: 'public',
           table: 'project_members',
-          filter: `project_id=eq.${projectId}`,
+          filter: filterSql,
         },
         () => loadParticipants(),
       )
-      .subscribe();
+      .subscribe((status, err) => {
+        channelReady = status === 'SUBSCRIBED';
+        // eslint-disable-next-line no-console
+        console.log('[ConflictPanel] sprint_votes realtime channel', {
+          status,
+          channel: `sprint-votes-${projectId}`,
+          filter: filterSql,
+          errorMessage:
+            typeof err?.message === 'string'
+              ? err.message
+              : err != null
+                ? String(err)
+                : null,
+          subscribedOk: channelReady,
+        });
+      });
 
     return () => {
+      // eslint-disable-next-line no-console
+      console.log('[ConflictPanel] sprint_votes realtime channel remove', {
+        projectId,
+        wasSubscribed: channelReady,
+      });
       supabase.removeChannel(channel);
     };
   }, [projectId, loadVotes, loadParticipants]);
