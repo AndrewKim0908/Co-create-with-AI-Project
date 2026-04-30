@@ -1837,6 +1837,39 @@ function pickLinkedMemberUid(row) {
   );
 }
 
+function emailLocalPart(email) {
+  const e = String(email || '').trim();
+  const at = e.indexOf('@');
+  return at > 0 ? e.slice(0, at) : e;
+}
+
+/**
+ * Member list label: prefer signup full_name (auth user_metadata for the current user;
+ * for others, public.profiles.full_name when the project mirrors auth — common Supabase pattern).
+ * Otherwise email local-part before @.
+ */
+function participantVoteDisplayName({
+  userId,
+  email,
+  authSelfId,
+  authSelfFullName,
+  profileFullNameById,
+}) {
+  const uid = userId ? String(userId) : null;
+  const local = emailLocalPart(email);
+  if (!uid) {
+    return local || String(email || '').trim() || '—';
+  }
+  const selfId = authSelfId ? String(authSelfId) : null;
+  const isSelf = selfId && uid === selfId;
+  const selfNm = String(authSelfFullName || '').trim();
+  const prof = String(profileFullNameById[uid] || '').trim();
+  if (isSelf && selfNm) return selfNm;
+  if (prof) return prof;
+  if (local) return local;
+  return `${uid.slice(0, 8)}…`;
+}
+
 // ─── Conflict panel ──────────────────────────────────────────
 function ConflictPanel({
   width,
@@ -1892,22 +1925,26 @@ function ConflictPanel({
       setParticipants([]);
       return [];
     }
+    const { data: authRow } = await supabase.auth.getUser();
+    const authUser = authRow?.user ?? null;
+    const authSelfId = authUser?.id ? String(authUser.id) : null;
+    const authSelfFullName = authUser?.user_metadata?.full_name ?? '';
+
     const { data: rows } = await supabase
       .from('project_members')
       .select('*')
       .eq('project_id', projectId);
 
     const seen = new Set();
-    const list = [];
-    const ownerUid = ownerUserId || null;
+    const tentative = [];
+    const ownerUid = ownerUserId ? String(ownerUserId) : null;
 
     if (ownerUid) {
-      const ou = String(ownerUid);
-      seen.add(ou);
-      list.push({
-        key: `owner:${ou}`,
-        userId: ou,
-        label: t('voteParticipantOwner'),
+      seen.add(ownerUid);
+      tentative.push({
+        key: `owner:${ownerUid}`,
+        userId: ownerUid,
+        email: null,
       });
     }
 
@@ -1919,29 +1956,52 @@ function ConflictPanel({
 
       if (linked) {
         seen.add(linked);
-        list.push({
+        tentative.push({
           key: `m:${linked}`,
           userId: linked,
-          label: email || `${String(linked).slice(0, 6)}…`,
+          email,
         });
         return;
       }
-      list.push({
+      tentative.push({
         key: email ? `e:${email}` : `row:${row.id || 'unknown'}`,
         userId: null,
-        label: email || '—',
+        email,
       });
     });
 
-    list.sort((a, b) => {
-      const ao = a.key.startsWith('owner') ? 0 : 1;
-      const bo = b.key.startsWith('owner') ? 0 : 1;
-      if (ao !== bo) return ao - bo;
-      return String(a.label).localeCompare(String(b.label));
-    });
+    const uidNeedingProfile = [
+      ...new Set(tentative.map((t) => t.userId).filter(Boolean)),
+    ].map(String);
+    const profileFullNameById = {};
+    if (uidNeedingProfile.length > 0) {
+      const { data: profileRows } = await supabase
+        .from('profiles')
+        .select('id, full_name')
+        .in('id', uidNeedingProfile);
+      (profileRows || []).forEach((r) => {
+        const id = r?.id ? String(r.id) : null;
+        if (!id || r.full_name == null) return;
+        profileFullNameById[id] = r.full_name;
+      });
+    }
+
+    const list = tentative.map((t) => ({
+      key: t.key,
+      userId: t.userId,
+      label: participantVoteDisplayName({
+        userId: t.userId,
+        email: t.email,
+        authSelfId,
+        authSelfFullName,
+        profileFullNameById,
+      }),
+    }));
+
+    list.sort((a, b) => String(a.label).localeCompare(String(b.label)));
     setParticipants(list);
     return list;
-  }, [projectId, ownerUserId, t]);
+  }, [projectId, ownerUserId]);
 
   /** Every project participant with a linked account must have vote === 'approve' in sprint_votes. Pending invites without user_id cannot vote yet and do not satisfy or block quorum. Never pass when nobody has a uid. */
   function allLinkedParticipantsApproved(participantsList, votesMap) {
@@ -2076,9 +2136,31 @@ function ConflictPanel({
     const sn = Number(sprintNumber);
     if (!projectId || !Number.isFinite(sn)) return false;
 
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id || null;
-    if (!uid) return false;
+    const { data: authPayload, error: authErr } = await supabase.auth.getUser();
+    const sessionUser = authPayload?.user ?? null;
+    if (authErr) {
+      // eslint-disable-next-line no-console
+      console.error('[ConflictPanel] castVote auth error', authErr.message);
+      return false;
+    }
+    const uidRaw = sessionUser?.id;
+    const uid =
+      typeof uidRaw === 'string' && uidRaw.length > 0 ? uidRaw.trim() : String(uidRaw || '').trim();
+    if (!uid) {
+      // eslint-disable-next-line no-console
+      console.warn('[ConflictPanel] castVote no user id — not signed in?');
+      return false;
+    }
+
+    const voteValue = kind === 'approve' ? 'approve' : 'oppose';
+    // eslint-disable-next-line no-console
+    console.log('[ConflictPanel] castVote submitting', {
+      voterUserId: uid,
+      vote: voteValue,
+      projectId,
+      sprintNumber: sn,
+      sessionEmail: sessionUser?.email ?? null,
+    });
 
     setVoteSaving(true);
     try {
@@ -2087,7 +2169,7 @@ function ConflictPanel({
           project_id: projectId,
           sprint_number: sn,
           user_id: uid,
-          vote: kind === 'approve' ? 'approve' : 'oppose',
+          vote: voteValue,
           updated_at: new Date().toISOString(),
         },
         { onConflict: 'project_id,sprint_number,user_id' },
