@@ -2032,44 +2032,43 @@ function ConflictPanel({
     ].filter(Boolean);
 
     const profileFullNameById = {};
+    let profileRowsRaw = null;
+    let profileFetchErr = null;
     if (profileIds.length > 0) {
-      const { data: profileRows, error: profileErr } = await supabase
+      const profileRes = await supabase
         .from('profiles')
         .select('id, full_name')
         .in('id', profileIds);
-      (profileRows || []).forEach((r) => {
+      profileRowsRaw = profileRes.data ?? null;
+      profileFetchErr = profileRes.error ?? null;
+      (profileRowsRaw || []).forEach((r) => {
         const id = normalizeParticipantUserId(r?.id);
         if (!id) return;
         if (r.full_name != null && String(r.full_name).trim() !== '') {
           profileFullNameById[id] = String(r.full_name).trim();
         }
       });
-      const returnedIds = new Set(
-        (profileRows || [])
-          .map((r) => normalizeParticipantUserId(r?.id))
-          .filter(Boolean),
-      );
-      const missingProfileRows = profileIds.filter((pid) => !returnedIds.has(pid));
-
-      // eslint-disable-next-line no-console
-      console.log('[ConflictPanel] profiles lookup', {
-        projectId,
-        requestedProfileIds: profileIds,
-        includesOwnerExplicit: !!(resolvedOwnerId && profileIds.includes(resolvedOwnerId)),
-        resolvedOwnerId,
-        profileRowCount: profileRows?.length ?? 0,
-        profileRowsRaw: profileRows,
-        mappedFullNamesById: { ...profileFullNameById },
-        missingUserIdsNoProfileRow: missingProfileRows,
-        profileQueryError: profileErr?.message ?? null,
-      });
-    } else {
-      // eslint-disable-next-line no-console
-      console.log('[ConflictPanel] profiles lookup skipped (no uid to query)', {
-        projectId,
-        resolvedOwnerId,
-      });
     }
+
+    const returnedIds = new Set(
+      (profileRowsRaw || [])
+        .map((r) => normalizeParticipantUserId(r?.id))
+        .filter(Boolean),
+    );
+    const missingUserIdsNoProfileRow = profileIds.filter((pid) => !returnedIds.has(pid));
+
+    // eslint-disable-next-line no-console
+    console.log('[ConflictPanel] profiles lookup', {
+      requestedProfileIds: [...profileIds],
+      profileRowCount: profileRowsRaw?.length ?? 0,
+      profileRowsRaw,
+      mappedFullNamesById: { ...profileFullNameById },
+      missingUserIdsNoProfileRow,
+      projectId,
+      resolvedOwnerId,
+      profilesQuerySkipped: profileIds.length === 0,
+      profileQueryError: profileFetchErr?.message ?? null,
+    });
 
     const list = tentative.map((t) => ({
       key: t.key,
