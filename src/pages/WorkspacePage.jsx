@@ -1843,6 +1843,13 @@ function emailLocalPart(email) {
   return at > 0 ? e.slice(0, at) : e;
 }
 
+/** Single map-key form for participant user ids (avoids casing mismatch between sprint_votes, props, profiles). */
+function normalizeParticipantUserId(id) {
+  if (id == null || id === '') return null;
+  const s = String(id).trim().toLowerCase();
+  return s.length ? s : null;
+}
+
 /**
  * Member list label: prefer signup full_name (auth user_metadata for the current user;
  * for others, public.profiles.full_name when the project mirrors auth — common Supabase pattern).
@@ -1855,19 +1862,29 @@ function participantVoteDisplayName({
   authSelfFullName,
   profileFullNameById,
 }) {
-  const uid = userId ? String(userId) : null;
+  const uidNorm = normalizeParticipantUserId(userId);
   const local = emailLocalPart(email);
-  if (!uid) {
+  if (!uidNorm) {
     return local || String(email || '').trim() || '—';
   }
-  const selfId = authSelfId ? String(authSelfId) : null;
-  const isSelf = selfId && uid === selfId;
+  const selfNorm = normalizeParticipantUserId(authSelfId);
+  const isSelf = selfNorm !== null && uidNorm === selfNorm;
   const selfNm = String(authSelfFullName || '').trim();
-  const prof = String(profileFullNameById[uid] || '').trim();
+  const prof = String(profileFullNameById[uidNorm] || '').trim();
   if (isSelf && selfNm) return selfNm;
   if (prof) return prof;
   if (local) return local;
-  return `${uid.slice(0, 8)}…`;
+  return `${uidNorm.slice(0, 8)}…`;
+}
+
+/** Sprint index for sprint_votes (avoids JS Number(null)==0 querying the wrong sprint). */
+function resolveSprintVotesSprintNumber(sprintNumberRaw) {
+  if (sprintNumberRaw === null || sprintNumberRaw === undefined || sprintNumberRaw === '') {
+    return null;
+  }
+  const n = Math.trunc(Number(sprintNumberRaw));
+  if (!Number.isFinite(n) || n < 1) return null;
+  return n;
 }
 
 // ─── Conflict panel ──────────────────────────────────────────
@@ -1897,24 +1914,48 @@ function ConflictPanel({
   const unanimousNavLockRef = useRef(false);
 
   const sprintVoteKeyOk = Boolean(
-    projectId && Number.isFinite(Number(sprintNumber)),
+    projectId && resolveSprintVotesSprintNumber(sprintNumber) != null,
   );
 
   const loadVotes = useCallback(async () => {
-    const sn = Number(sprintNumber);
-    if (!projectId || !Number.isFinite(sn)) {
+    const sn = resolveSprintVotesSprintNumber(sprintNumber);
+    if (!projectId || sn == null) {
       setVoteMap({});
       return {};
     }
-    const { data } = await supabase
+    const voteQuery = supabase
       .from('sprint_votes')
-      .select('user_id, vote')
+      .select('project_id, sprint_number, user_id, vote')
       .eq('project_id', projectId)
       .eq('sprint_number', sn);
+    const { data, error } = await voteQuery;
+
+    // eslint-disable-next-line no-console
+    console.log('[ConflictPanel] sprint_votes fetch', {
+      projectId,
+      sprintNumberFiltered: sn,
+      sprintNumberPropRaw: sprintNumber,
+      rowCount: data?.length ?? 0,
+      rows: data,
+      fetchError: error?.message ?? null,
+    });
 
     const next = {};
     (data || []).forEach((r) => {
-      if (r.user_id) next[String(r.user_id)] = r.vote;
+      const uid = normalizeParticipantUserId(r.user_id);
+      if (!uid) return;
+      const rowSn = resolveSprintVotesSprintNumber(r.sprint_number);
+      const rowPid = r.project_id != null ? String(r.project_id) : null;
+      if (String(projectId) !== rowPid || rowSn !== sn) {
+        // eslint-disable-next-line no-console
+        console.warn('[ConflictPanel] sprint_votes row outside filter (unexpected)', {
+          row: r,
+          expectedProjectId: projectId,
+          expectedSprint: sn,
+        });
+        return;
+      }
+      next[uid] = r.vote;
     });
     setVoteMap(next);
     return next;
@@ -1927,8 +1968,19 @@ function ConflictPanel({
     }
     const { data: authRow } = await supabase.auth.getUser();
     const authUser = authRow?.user ?? null;
-    const authSelfId = authUser?.id ? String(authUser.id) : null;
+    const authSelfId = normalizeParticipantUserId(authUser?.id);
     const authSelfFullName = authUser?.user_metadata?.full_name ?? '';
+
+    /** Owner id from props or DB so profile lookup always includes creator. */
+    let resolvedOwnerId = normalizeParticipantUserId(ownerUserId);
+    if (!resolvedOwnerId) {
+      const { data: projRow } = await supabase
+        .from('projects')
+        .select('user_id')
+        .eq('id', projectId)
+        .maybeSingle();
+      resolvedOwnerId = normalizeParticipantUserId(projRow?.user_id);
+    }
 
     const { data: rows } = await supabase
       .from('project_members')
@@ -1937,20 +1989,19 @@ function ConflictPanel({
 
     const seen = new Set();
     const tentative = [];
-    const ownerUid = ownerUserId ? String(ownerUserId) : null;
 
-    if (ownerUid) {
-      seen.add(ownerUid);
+    if (resolvedOwnerId) {
+      seen.add(resolvedOwnerId);
       tentative.push({
-        key: `owner:${ownerUid}`,
-        userId: ownerUid,
+        key: `owner:${resolvedOwnerId}`,
+        userId: resolvedOwnerId,
         email: null,
       });
     }
 
     (rows || []).forEach((row) => {
       const linkedRaw = pickLinkedMemberUid(row);
-      const linked = linkedRaw ? String(linkedRaw) : null;
+      const linked = normalizeParticipantUserId(linkedRaw);
       const email = String(row.invited_email || '').trim() || null;
       if (linked && seen.has(linked)) return;
 
@@ -1970,25 +2021,59 @@ function ConflictPanel({
       });
     });
 
-    const uidNeedingProfile = [
-      ...new Set(tentative.map((t) => t.userId).filter(Boolean)),
-    ].map(String);
+    const idsFromParticipants = tentative
+      .map((t) => t.userId)
+      .filter(Boolean);
+    const profileIds = [
+      ...new Set([
+        ...(resolvedOwnerId ? [resolvedOwnerId] : []),
+        ...idsFromParticipants,
+      ]),
+    ].filter(Boolean);
+
     const profileFullNameById = {};
-    if (uidNeedingProfile.length > 0) {
-      const { data: profileRows } = await supabase
+    if (profileIds.length > 0) {
+      const { data: profileRows, error: profileErr } = await supabase
         .from('profiles')
         .select('id, full_name')
-        .in('id', uidNeedingProfile);
+        .in('id', profileIds);
       (profileRows || []).forEach((r) => {
-        const id = r?.id ? String(r.id) : null;
-        if (!id || r.full_name == null) return;
-        profileFullNameById[id] = r.full_name;
+        const id = normalizeParticipantUserId(r?.id);
+        if (!id) return;
+        if (r.full_name != null && String(r.full_name).trim() !== '') {
+          profileFullNameById[id] = String(r.full_name).trim();
+        }
+      });
+      const returnedIds = new Set(
+        (profileRows || [])
+          .map((r) => normalizeParticipantUserId(r?.id))
+          .filter(Boolean),
+      );
+      const missingProfileRows = profileIds.filter((pid) => !returnedIds.has(pid));
+
+      // eslint-disable-next-line no-console
+      console.log('[ConflictPanel] profiles lookup', {
+        projectId,
+        requestedProfileIds: profileIds,
+        includesOwnerExplicit: !!(resolvedOwnerId && profileIds.includes(resolvedOwnerId)),
+        resolvedOwnerId,
+        profileRowCount: profileRows?.length ?? 0,
+        profileRowsRaw: profileRows,
+        mappedFullNamesById: { ...profileFullNameById },
+        missingUserIdsNoProfileRow: missingProfileRows,
+        profileQueryError: profileErr?.message ?? null,
+      });
+    } else {
+      // eslint-disable-next-line no-console
+      console.log('[ConflictPanel] profiles lookup skipped (no uid to query)', {
+        projectId,
+        resolvedOwnerId,
       });
     }
 
     const list = tentative.map((t) => ({
       key: t.key,
-      userId: t.userId,
+      userId: t.userId ?? null,
       label: participantVoteDisplayName({
         userId: t.userId,
         email: t.email,
@@ -2007,7 +2092,7 @@ function ConflictPanel({
   function allLinkedParticipantsApproved(participantsList, votesMap) {
     const ids = [];
     participantsList.forEach((p) => {
-      const id = p.userId ? String(p.userId) : null;
+      const id = normalizeParticipantUserId(p.userId);
       if (id && !ids.includes(id)) ids.push(id);
     });
     if (ids.length === 0) return false;
@@ -2021,12 +2106,12 @@ function ConflictPanel({
 
     const requiredIds = [];
     participantsListFresh.forEach((p) => {
-      const id = p.userId ? String(p.userId) : null;
+      const id = normalizeParticipantUserId(p.userId);
       if (id && !requiredIds.includes(id)) requiredIds.push(id);
     });
 
     const participantRowsForLog = participantsListFresh.map((p) => {
-      const uid = p.userId ? String(p.userId) : null;
+      const uid = normalizeParticipantUserId(p.userId);
       return {
         key: p.key,
         label: p.label,
@@ -2069,10 +2154,10 @@ function ConflictPanel({
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
-      setAuthUid(data?.user?.id ?? null);
+      setAuthUid(normalizeParticipantUserId(data?.user?.id ?? null));
     });
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      setAuthUid(session?.user?.id ?? null);
+      setAuthUid(normalizeParticipantUserId(session?.user?.id ?? null));
     });
     return () => listener.subscription.unsubscribe();
   }, []);
@@ -2133,8 +2218,8 @@ function ConflictPanel({
   }, [projectId, loadVotes, loadParticipants]);
 
   async function castVote(kind) {
-    const sn = Number(sprintNumber);
-    if (!projectId || !Number.isFinite(sn)) return false;
+    const sn = resolveSprintVotesSprintNumber(sprintNumber);
+    if (!projectId || sn == null) return false;
 
     const { data: authPayload, error: authErr } = await supabase.auth.getUser();
     const sessionUser = authPayload?.user ?? null;
@@ -2144,8 +2229,7 @@ function ConflictPanel({
       return false;
     }
     const uidRaw = sessionUser?.id;
-    const uid =
-      typeof uidRaw === 'string' && uidRaw.length > 0 ? uidRaw.trim() : String(uidRaw || '').trim();
+    const uid = normalizeParticipantUserId(uidRaw);
     if (!uid) {
       // eslint-disable-next-line no-console
       console.warn('[ConflictPanel] castVote no user id — not signed in?');
@@ -2224,7 +2308,7 @@ function ConflictPanel({
   const showVoteWaitingOthers =
     !!(
       authUid
-      && voteMap[String(authUid)] === 'approve'
+      && voteMap[authUid] === 'approve'
       && !allLinkedParticipantsApproved(participants, voteMap)
     );
 
@@ -2547,7 +2631,8 @@ function ConflictPanel({
                   participants.map((p) => {
                     let status = 'pending';
                     if (p.userId) {
-                      const v = voteMap[String(p.userId)];
+                      const uidNorm = normalizeParticipantUserId(p.userId);
+                      const v = uidNorm ? voteMap[uidNorm] : undefined;
                       if (v === 'approve') status = 'approve';
                       else if (v === 'oppose') status = 'oppose';
                       else status = 'pending';
@@ -3248,6 +3333,25 @@ export default function WorkspacePage() {
     setViewingSprint(nextSprint);
 
     if (projectId) {
+      if (Number.isFinite(currentSprint) && currentSprint >= 1) {
+        const { error: delVotesErr } = await supabase
+          .from('sprint_votes')
+          .delete()
+          .eq('project_id', projectId)
+          .eq('sprint_number', currentSprint);
+        if (delVotesErr) {
+          // eslint-disable-next-line no-console
+          console.error('[WorkspacePage] delete sprint_votes for ended sprint failed', delVotesErr);
+        } else {
+          // eslint-disable-next-line no-console
+          console.log('[WorkspacePage] cleared sprint_votes', {
+            projectId,
+            clearedSprintNumber: currentSprint,
+            nextSprint,
+          });
+        }
+      }
+
       const { error: cleanupDesignError } = await supabase
         .from('design_files')
         .delete()
