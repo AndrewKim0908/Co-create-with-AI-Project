@@ -1,12 +1,15 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import Header from '@/components/Header';
 import Icon from '@/components/Icon';
 import { C } from '@/constants/colors';
 import { getProjectById, DEFAULT_PROJECT } from '@/constants/projects';
 import { useLang } from '@/i18n/LangContext';
 import { supabase } from '@/lib/supabase';
+
+/** Prevents duplicate onApprove under React StrictMode / double effects (module-scoped). */
+let conflictUnanimousNavToken = null;
 
 /** message-square 실루엣 — 내부 흰색 채움 + 테두리 (커서용) */
 const MARKER_CURSOR_SVG =
@@ -373,7 +376,18 @@ function DesignMarker({
   );
 }
 
-function BlueprintViewer({ projectId, designImageUrl, onUploadImage, onDeleteImage, uploadState }) {
+function BlueprintViewer({
+  projectId,
+  timelineAnchorSeed,
+  designImageUrl,
+  onUploadImage,
+  onDeleteImage,
+  uploadState,
+  currentSprint,
+  viewingSprint,
+  onSprintSelect,
+  onRequestDeleteSprint,
+}) {
   const { t } = useLang();
   const canvasRef = useRef(null);
   const viewportRef = useRef(null);
@@ -395,6 +409,7 @@ function BlueprintViewer({ projectId, designImageUrl, onUploadImage, onDeleteIma
   const [draftNote, setDraftNote] = useState('');
   const [imageMenu, setImageMenu] = useState({ open: false, x: 0, y: 0 });
   const [currentUserEmail, setCurrentUserEmail] = useState('');
+  const isReadOnlySprint = Number(viewingSprint) !== Number(currentSprint);
 
   useEffect(() => {
     panXRef.current = panX;
@@ -486,14 +501,15 @@ function BlueprintViewer({ projectId, designImageUrl, onUploadImage, onDeleteIma
     let alive = true;
 
     async function loadMarkers() {
-      if (!projectId) {
+      if (!projectId || !Number.isFinite(Number(viewingSprint))) {
         setDesignMarkers([]);
         return;
       }
       const { data, error } = await supabase
         .from('markers')
-        .select('id, project_id, x_pct, y_pct, note, created_by, created_at')
+        .select('id, project_id, sprint_number, x_pct, y_pct, note, created_by, created_at')
         .eq('project_id', projectId)
+        .eq('sprint_number', Number(viewingSprint))
         .order('created_at', { ascending: true });
       if (!alive) return;
       if (error) {
@@ -513,6 +529,8 @@ function BlueprintViewer({ projectId, designImageUrl, onUploadImage, onDeleteIma
         { event: 'INSERT', schema: 'public', table: 'markers', filter: `project_id=eq.${projectId}` },
         (payload) => {
           console.log('[markers realtime] INSERT payload', payload);
+          const payloadSprint = Number(payload?.new?.sprint_number);
+          if (payloadSprint !== Number(viewingSprint)) return;
           const next = normalizeMarkerRow(payload.new);
           if (!next) return;
           setDesignMarkers((prev) => (prev.some((m) => String(m.id) === String(next.id)) ? prev : [...prev, next]));
@@ -547,6 +565,8 @@ function BlueprintViewer({ projectId, designImageUrl, onUploadImage, onDeleteIma
             id: payload?.new?.id,
             projectId,
           });
+          const payloadSprint = Number(payload?.new?.sprint_number);
+          if (payloadSprint !== Number(viewingSprint)) return;
           const next = normalizeMarkerRow(payload.new);
           if (!next) {
             console.warn('[markers realtime] UPDATE received without normalizable payload.new', payload);
@@ -578,14 +598,20 @@ function BlueprintViewer({ projectId, designImageUrl, onUploadImage, onDeleteIma
       alive = false;
       supabase.removeChannel(channel);
     };
-  }, [projectId]);
+  }, [projectId, viewingSprint]);
 
   function viewportCursor() {
     if (isPanning) return 'grabbing';
     if (handTool || spaceHeld) return 'grab';
-    if (markerMode) return MARKER_MODE_CURSOR;
+    if (markerMode && !isReadOnlySprint) return MARKER_MODE_CURSOR;
     return 'default';
   }
+
+  useEffect(() => {
+    if (!isReadOnlySprint) return;
+    clearPendingDraft();
+    setMarkerMode(false);
+  }, [isReadOnlySprint]);
 
   useEffect(() => {
     const el = viewportRef.current;
@@ -650,6 +676,7 @@ function BlueprintViewer({ projectId, designImageUrl, onUploadImage, onDeleteIma
   }
 
   function toggleMarkerMode() {
+    if (isReadOnlySprint) return;
     if (markerMode) {
       clearPendingDraft();
       setMarkerMode(false);
@@ -677,7 +704,7 @@ function BlueprintViewer({ projectId, designImageUrl, onUploadImage, onDeleteIma
       skipNextMarkerClick.current = false;
       return;
     }
-    if (!markerMode || handTool) return;
+    if (!markerMode || handTool || isReadOnlySprint) return;
     if (e.target.closest('[data-marker-root]')) return;
     if (!projectId) return;
     const el = canvasRef.current;
@@ -696,6 +723,7 @@ function BlueprintViewer({ projectId, designImageUrl, onUploadImage, onDeleteIma
       project_id: projectId,
       x_pct: pendingMarker.xPct,
       y_pct: pendingMarker.yPct,
+      sprint_number: Number(viewingSprint),
       note: text,
       created_by: currentUserEmail || null,
     };
@@ -704,8 +732,8 @@ function BlueprintViewer({ projectId, designImageUrl, onUploadImage, onDeleteIma
       operation: 'insert',
       payload: insertPayload,
       pseudoSql:
-        'insert into markers (project_id, x_pct, y_pct, note, created_by) ' +
-        'values ($1, $2, $3, $4, $5) returning *; ' +
+        'insert into markers (project_id, x_pct, y_pct, sprint_number, note, created_by) ' +
+        'values ($1, $2, $3, $4, $5, $6) returning *; ' +
         `-- payload=${JSON.stringify(insertPayload)}`,
     };
     console.log('[BlueprintViewer] Inserting marker (request)', queryDescription);
@@ -713,7 +741,7 @@ function BlueprintViewer({ projectId, designImageUrl, onUploadImage, onDeleteIma
     const { data, error, status, statusText } = await supabase
       .from('markers')
       .insert(insertPayload)
-      .select('id, project_id, x_pct, y_pct, note, created_by, created_at')
+      .select('id, project_id, sprint_number, x_pct, y_pct, note, created_by, created_at')
       .single();
 
     console.log('[BlueprintViewer] Inserting marker (response)', {
@@ -779,7 +807,6 @@ function BlueprintViewer({ projectId, designImageUrl, onUploadImage, onDeleteIma
         </defs>
         <rect width="100%" height="100%" fill="url(#grid)" />
       </svg>
-
       <div
         ref={viewportRef}
         onMouseDown={onViewportMouseDown}
@@ -841,7 +868,7 @@ function BlueprintViewer({ projectId, designImageUrl, onUploadImage, onDeleteIma
           (() => {
             const markerEmail = String(m.createdBy || '').trim().toLowerCase();
             const myEmail = String(currentUserEmail || '').trim().toLowerCase();
-            const isMine = Boolean(markerEmail && myEmail && markerEmail === myEmail);
+            const isMine = Boolean(markerEmail && myEmail && markerEmail === myEmail) && !isReadOnlySprint;
             const markerUserColor = getUserColor(markerEmail);
             return (
           <DesignMarker
@@ -890,6 +917,36 @@ function BlueprintViewer({ projectId, designImageUrl, onUploadImage, onDeleteIma
           </div>
         </div>
       </div>
+      {!designImageUrl ? (
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            pointerEvents: 'none',
+            zIndex: 7,
+          }}
+        >
+          <div
+            style={{
+              maxWidth: 420,
+              textAlign: 'center',
+              padding: '14px 18px',
+              borderRadius: 8,
+              background: 'rgba(255,255,255,0.78)',
+              border: `1px solid ${C.borderSubtle}`,
+              boxShadow: '0 8px 24px rgba(30,42,53,0.08)',
+            }}
+          >
+            <Icon name="upload" size={22} color={C.fg3} />
+            <div style={{ marginTop: 8, fontSize: 12, color: C.fg2, lineHeight: 1.5 }}>
+              {t('newSprintUploadGuide')}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {imageMenu.open && designImageUrl ? (
         <div
@@ -933,8 +990,23 @@ function BlueprintViewer({ projectId, designImageUrl, onUploadImage, onDeleteIma
         </div>
       ) : null}
 
-      <div style={{ position: 'absolute', top: 14, left: 14 }}>
-        <label
+      <div
+        style={{
+          position: 'absolute',
+          top: 14,
+          left: 14,
+          right: 14,
+          display: 'flex',
+          flexDirection: 'row',
+          alignItems: 'flex-start',
+          gap: 12,
+          zIndex: 12,
+          minWidth: 0,
+          pointerEvents: 'none',
+        }}
+      >
+        <div style={{ flexShrink: 0, pointerEvents: 'auto', display: 'flex', flexDirection: 'column' }}>
+          <label
           style={{
             display: 'inline-flex',
             alignItems: 'center',
@@ -960,23 +1032,31 @@ function BlueprintViewer({ projectId, designImageUrl, onUploadImage, onDeleteIma
             onChange={onUploadImage}
             disabled={uploadState.status === 'uploading'}
           />
-        </label>
-        {uploadState.message ? (
-          <div
-            style={{
-              marginTop: 6,
-              fontSize: 10,
-              color: uploadState.status === 'error' ? C.coral : C.emerald,
-              background: C.white,
-              border: `1px solid ${uploadState.status === 'error' ? C.coralBorder : C.emeraldBorder}`,
-              borderRadius: 4,
-              padding: '4px 6px',
-              display: 'inline-block',
-            }}
-          >
-            {uploadState.message}
-          </div>
-        ) : null}
+          </label>
+          {uploadState.message ? (
+            <div
+              style={{
+                marginTop: 6,
+                fontSize: 10,
+                color: uploadState.status === 'error' ? C.coral : C.emerald,
+                background: C.white,
+                border: `1px solid ${uploadState.status === 'error' ? C.coralBorder : C.emeraldBorder}`,
+                borderRadius: 4,
+                padding: '4px 6px',
+                display: 'inline-block',
+              }}
+            >
+              {uploadState.message}
+            </div>
+          ) : null}
+        </div>
+        <SprintTimelinePanel
+          timelineAnchorSeed={timelineAnchorSeed}
+          currentSprint={currentSprint}
+          viewingSprint={viewingSprint}
+          onSprintSelect={onSprintSelect}
+          onRequestDeleteSprint={onRequestDeleteSprint}
+        />
       </div>
 
       <div style={{ position: 'absolute', bottom: 16, right: 16, display: 'flex', gap: 4 }}>
@@ -996,10 +1076,11 @@ function BlueprintViewer({ projectId, designImageUrl, onUploadImage, onDeleteIma
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            cursor: 'pointer',
+            cursor: isReadOnlySprint ? 'not-allowed' : 'pointer',
             boxShadow: markerMode
               ? '0 1px 6px rgba(208,80,69,0.2)'
               : '0 1px 3px rgba(30,42,53,0.08)',
+            opacity: isReadOnlySprint ? 0.5 : 1,
           }}
         >
           <Icon
@@ -1110,7 +1191,7 @@ function BlueprintViewer({ projectId, designImageUrl, onUploadImage, onDeleteIma
 }
 
 // ─── Chat panel ──────────────────────────────────────────────
-function ChatPanel({ projectId, senderRole = 'engineer' }) {
+function ChatPanel({ projectId, senderRole = 'engineer', width = 220 }) {
   const { t, lang } = useLang();
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState([]);
@@ -1403,10 +1484,16 @@ function ChatPanel({ projectId, senderRole = 'engineer' }) {
   return (
     <div
       style={{
-        width: 220, background: C.white,
+        width,
+        background: C.white,
         borderLeft: `1px solid ${C.borderSubtle}`,
         borderRight: `1px solid ${C.borderSubtle}`,
-        display: 'flex', flexDirection: 'column', flexShrink: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        flexShrink: 0,
+        minWidth: 0,
+        position: 'relative',
+        zIndex: 0,
       }}
     >
       <div
@@ -1738,186 +1825,1181 @@ function RadarChart() {
   );
 }
 
+function pickLinkedMemberUid(row) {
+  if (!row || typeof row !== 'object') return null;
+  return (
+    row.user_id ||
+    row.member_user_id ||
+    row.member_id ||
+    row.accepted_user_id ||
+    row.invited_user_id ||
+    null
+  );
+}
+
 // ─── Conflict panel ──────────────────────────────────────────
-function ConflictPanel({ onApprove, onReject }) {
+function ConflictPanel({
+  width,
+  projectId,
+  sprintNumber,
+  ownerUserId = null,
+  consensusNote = '',
+  onSaveConsensusNote,
+  onApprove,
+  onReject,
+  onReachConsensus,
+}) {
   const { t, lang } = useLang();
   const [appHov, setAppHov] = useState(false);
-  const [rejHov, setRejHov] = useState(false);
+  const [conHov, setConHov] = useState(false);
+  const [aiUi, setAiUi] = useState('idle');
+  const [noteDraft, setNoteDraft] = useState('');
+  const [memoLocked, setMemoLocked] = useState(false);
+  const [savingMemo, setSavingMemo] = useState(false);
+  const [oppHov, setOppHov] = useState(false);
+  const [voteSaving, setVoteSaving] = useState(false);
+  const [participants, setParticipants] = useState([]);
+  const [voteMap, setVoteMap] = useState({});
+  const [authUid, setAuthUid] = useState(null);
+  const unanimousNavLockRef = useRef(false);
+
+  const sprintVoteKeyOk = Boolean(
+    projectId && Number.isFinite(Number(sprintNumber)),
+  );
+
+  const loadVotes = useCallback(async () => {
+    const sn = Number(sprintNumber);
+    if (!projectId || !Number.isFinite(sn)) {
+      setVoteMap({});
+      return {};
+    }
+    const { data } = await supabase
+      .from('sprint_votes')
+      .select('user_id, vote')
+      .eq('project_id', projectId)
+      .eq('sprint_number', sn);
+
+    const next = {};
+    (data || []).forEach((r) => {
+      if (r.user_id) next[String(r.user_id)] = r.vote;
+    });
+    setVoteMap(next);
+    return next;
+  }, [projectId, sprintNumber]);
+
+  const loadParticipants = useCallback(async () => {
+    if (!projectId) {
+      setParticipants([]);
+      return [];
+    }
+    const { data: rows } = await supabase
+      .from('project_members')
+      .select('*')
+      .eq('project_id', projectId);
+
+    const seen = new Set();
+    const list = [];
+    const ownerUid = ownerUserId || null;
+
+    if (ownerUid) {
+      const ou = String(ownerUid);
+      seen.add(ou);
+      list.push({
+        key: `owner:${ou}`,
+        userId: ou,
+        label: t('voteParticipantOwner'),
+      });
+    }
+
+    (rows || []).forEach((row) => {
+      const linkedRaw = pickLinkedMemberUid(row);
+      const linked = linkedRaw ? String(linkedRaw) : null;
+      const email = String(row.invited_email || '').trim() || null;
+      if (linked && seen.has(linked)) return;
+
+      if (linked) {
+        seen.add(linked);
+        list.push({
+          key: `m:${linked}`,
+          userId: linked,
+          label: email || `${String(linked).slice(0, 6)}…`,
+        });
+        return;
+      }
+      list.push({
+        key: email ? `e:${email}` : `row:${row.id || 'unknown'}`,
+        userId: null,
+        label: email || '—',
+      });
+    });
+
+    list.sort((a, b) => {
+      const ao = a.key.startsWith('owner') ? 0 : 1;
+      const bo = b.key.startsWith('owner') ? 0 : 1;
+      if (ao !== bo) return ao - bo;
+      return String(a.label).localeCompare(String(b.label));
+    });
+    setParticipants(list);
+    return list;
+  }, [projectId, ownerUserId, t]);
+
+  /** Every project participant with a linked account must have vote === 'approve' in sprint_votes. Pending invites without user_id cannot vote yet and do not satisfy or block quorum. Never pass when nobody has a uid. */
+  function allLinkedParticipantsApproved(participantsList, votesMap) {
+    const ids = [];
+    participantsList.forEach((p) => {
+      const id = p.userId ? String(p.userId) : null;
+      if (id && !ids.includes(id)) ids.push(id);
+    });
+    if (ids.length === 0) return false;
+    return ids.every((userId) => votesMap[userId] === 'approve');
+  }
+
+  async function finalizeConsensusIfUnanimousFromApproveClick() {
+    if (!authUid || !sprintVoteKeyOk) return;
+    const votesMapFresh = await loadVotes();
+    const participantsListFresh = await loadParticipants();
+
+    const requiredIds = [];
+    participantsListFresh.forEach((p) => {
+      const id = p.userId ? String(p.userId) : null;
+      if (id && !requiredIds.includes(id)) requiredIds.push(id);
+    });
+
+    const participantRowsForLog = participantsListFresh.map((p) => {
+      const uid = p.userId ? String(p.userId) : null;
+      return {
+        key: p.key,
+        label: p.label,
+        userId: uid,
+        vote: uid ? votesMapFresh[uid] ?? null : '(no linked account)',
+      };
+    });
+    const approveCount = requiredIds.filter(
+      (id) => votesMapFresh[id] === 'approve',
+    ).length;
+
+    const allApprovedFlag = allLinkedParticipantsApproved(
+      participantsListFresh,
+      votesMapFresh,
+    );
+
+    // eslint-disable-next-line no-console
+    console.log('[ConflictPanel] Approve tally after vote', {
+      projectId,
+      sprintNumber,
+      requiredMemberCount: requiredIds.length,
+      approveCount,
+      allApproved: allApprovedFlag,
+      participants: participantRowsForLog,
+    });
+
+    if (!allApprovedFlag) return;
+    if (unanimousNavLockRef.current) return;
+    const navToken = `${projectId}:${sprintNumber}`;
+    if (conflictUnanimousNavToken === navToken) return;
+    unanimousNavLockRef.current = true;
+    conflictUnanimousNavToken = navToken;
+    try {
+      await onApprove?.();
+    } catch {
+      unanimousNavLockRef.current = false;
+      conflictUnanimousNavToken = null;
+    }
+  }
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      setAuthUid(data?.user?.id ?? null);
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setAuthUid(session?.user?.id ?? null);
+    });
+    return () => listener.subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    unanimousNavLockRef.current = false;
+    conflictUnanimousNavToken = null;
+  }, [projectId, sprintNumber]);
 
   const positions = [
     { who: lang === 'ko' ? '엔지니어' : lang === 'zh' ? '工程师' : 'Engineer', text: t('posEngineer'), icon: 'cpu',      color: C.emerald },
     { who: lang === 'ko' ? '디자이너' : lang === 'zh' ? '设计师' : 'Designer', text: t('posDesigner'), icon: 'pen-tool', color: '#3A6EA5' },
   ];
 
+  useEffect(() => {
+    const next = String(consensusNote ?? '');
+    setNoteDraft(next);
+    setMemoLocked(Boolean(next.trim()));
+  }, [consensusNote]);
+
+  useEffect(() => {
+    loadVotes();
+  }, [loadVotes]);
+
+  useEffect(() => {
+    loadParticipants();
+  }, [loadParticipants]);
+
+  useEffect(() => {
+    if (!projectId) return undefined;
+    const channel = supabase
+      .channel(`sprint-votes-${projectId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'sprint_votes',
+          filter: `project_id=eq.${projectId}`,
+        },
+        () => loadVotes(),
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'project_members',
+          filter: `project_id=eq.${projectId}`,
+        },
+        () => loadParticipants(),
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [projectId, loadVotes, loadParticipants]);
+
+  async function castVote(kind) {
+    const sn = Number(sprintNumber);
+    if (!projectId || !Number.isFinite(sn)) return false;
+
+    const { data: auth } = await supabase.auth.getUser();
+    const uid = auth?.user?.id || null;
+    if (!uid) return false;
+
+    setVoteSaving(true);
+    try {
+      const { error } = await supabase.from('sprint_votes').upsert(
+        {
+          project_id: projectId,
+          sprint_number: sn,
+          user_id: uid,
+          vote: kind === 'approve' ? 'approve' : 'oppose',
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'project_id,sprint_number,user_id' },
+      );
+
+      if (error) {
+        // eslint-disable-next-line no-console
+        console.error('[sprint_votes]', error.message);
+        return false;
+      }
+      const map = await loadVotes();
+      return map;
+    } finally {
+      setVoteSaving(false);
+    }
+  }
+
+  async function handleApproveVoteClick() {
+    const map = await castVote('approve');
+    if (map === false) return;
+    await finalizeConsensusIfUnanimousFromApproveClick();
+  }
+
+  async function handleOpposeVoteClick() {
+    await castVote('oppose');
+  }
+
+  function handleRequestAiAnalysis() {
+    if (aiUi === 'loading') return;
+    setAiUi('loading');
+    window.setTimeout(() => {
+      setAiUi('done');
+    }, 1500);
+  }
+
+  async function handleReachConsensusClick() {
+    if (memoLocked || !noteDraft.trim() || savingMemo) return;
+    setSavingMemo(true);
+    try {
+      const saved = await onSaveConsensusNote(noteDraft.trim());
+      if (saved === false) return;
+      setMemoLocked(true);
+      await onReachConsensus();
+    } finally {
+      setSavingMemo(false);
+    }
+  }
+
+  const hasNoteText = Boolean(noteDraft.trim());
+  const reachEnabled = hasNoteText && !memoLocked && !savingMemo;
+
+  const showVoteWaitingOthers =
+    !!(
+      authUid
+      && voteMap[String(authUid)] === 'approve'
+      && !allLinkedParticipantsApproved(participants, voteMap)
+    );
+
   return (
     <div
       style={{
-        width: 230, background: C.white,
+        width,
+        background: C.white,
         borderLeft: `1px solid ${C.borderSubtle}`,
-        display: 'flex', flexDirection: 'column', flexShrink: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        minHeight: 0,
+        flexShrink: 0,
+        minWidth: 0,
+        position: 'relative',
+        zIndex: 0,
       }}
     >
-      <div style={{ padding: '10px 12px', borderBottom: `1px solid ${C.borderSubtle}` }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
-          <Icon name="alert-triangle" size={13} color={C.coral} />
-          <span style={{ fontSize: 11, fontWeight: 600, color: C.fg2 }}>{t('cfHeader')}</span>
-        </div>
-        <div style={{ fontSize: 12, fontWeight: 600, color: C.fg1 }}>{t('cfTitle')}</div>
-        <div style={{ fontSize: 10, color: C.fg3, marginTop: 2 }}>{t('cfMeta')}</div>
-      </div>
-
       <div
         style={{
-          flex: 1, overflow: 'auto', padding: 12,
-          display: 'flex', flexDirection: 'column', gap: 12,
+          flex: 1,
+          minHeight: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
         }}
       >
-        <div>
-          <div
-            style={{
-              fontSize: 10, fontWeight: 600, textTransform: 'uppercase',
-              letterSpacing: '0.08em', color: C.fg3, marginBottom: 8,
-            }}
-          >
-            {t('positions')}
-          </div>
-          {positions.map((p) => (
-            <div
-              key={p.who}
+        <div
+          style={{
+            flex: '66 1 0%',
+            minHeight: 0,
+            overflow: 'auto',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 12,
+            padding: 12,
+            borderBottom: `1px solid ${C.borderSubtle}`,
+          }}
+        >
+          <div>
+            <button
+              type="button"
+              disabled={aiUi === 'loading'}
+              onClick={handleRequestAiAnalysis}
               style={{
-                display: 'flex', alignItems: 'flex-start', gap: 8,
-                padding: '8px', borderRadius: 4,
-                background: C.subtle, border: `1px solid ${C.borderSubtle}`,
-                marginBottom: 6,
+                width: '100%',
+                padding: '8px 10px',
+                borderRadius: 5,
+                fontSize: 11,
+                fontWeight: 600,
+                fontFamily: 'inherit',
+                border: `1px solid ${C.emeraldBorder}`,
+                background: aiUi === 'done' ? C.emeraldLight : C.white,
+                color: aiUi === 'done' ? C.emerald : C.fg2,
+                cursor: aiUi === 'loading' ? 'wait' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 8,
+                transition: 'background 160ms, color 160ms',
               }}
             >
+              {aiUi === 'loading' ? (
+                <>
+                  <span className="conflict-spin" style={{ display: 'inline-flex' }}>
+                    <Icon name="loader" size={14} color={C.emerald} />
+                  </span>
+                  <span>{t('requestAiAnalysisBtn')}</span>
+                </>
+              ) : aiUi === 'done' ? (
+                <>
+                  <Icon name="check-circle" size={14} color={C.emerald} />
+                  <span>{t('aiAnalysisComplete')}</span>
+                </>
+              ) : (
+                t('requestAiAnalysisBtn')
+              )}
+            </button>
+          </div>
+
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+              <Icon name="alert-triangle" size={13} color={C.coral} />
+              <span style={{ fontSize: 11, fontWeight: 600, color: C.fg2 }}>{t('cfHeader')}</span>
+            </div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: C.fg1 }}>{t('cfTitle')}</div>
+            <div style={{ fontSize: 10, color: C.fg3, marginTop: 2 }}>{t('cfMeta')}</div>
+          </div>
+
+          <div>
+            <div
+              style={{
+                fontSize: 10, fontWeight: 600, textTransform: 'uppercase',
+                letterSpacing: '0.08em', color: C.fg3, marginBottom: 8,
+              }}
+            >
+              {t('positions')}
+            </div>
+            {positions.map((p) => (
               <div
+                key={p.who}
                 style={{
-                  width: 20, height: 20, borderRadius: 3,
-                  background: `${p.color}15`,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  flexShrink: 0, marginTop: 1,
+                  display: 'flex', alignItems: 'flex-start', gap: 8,
+                  padding: '8px', borderRadius: 4,
+                  background: C.subtle, border: `1px solid ${C.borderSubtle}`,
+                  marginBottom: 6,
                 }}
               >
-                <Icon name={p.icon} size={11} color={p.color} />
-              </div>
-              <div>
-                <div style={{ fontSize: 10, fontWeight: 600, color: p.color, marginBottom: 1 }}>
-                  {p.who}
+                <div
+                  style={{
+                    width: 20, height: 20, borderRadius: 3,
+                    background: `${p.color}15`,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    flexShrink: 0, marginTop: 1,
+                  }}
+                >
+                  <Icon name={p.icon} size={11} color={p.color} />
                 </div>
-                <div style={{ fontSize: 11, color: C.fg2 }}>{p.text}</div>
+                <div>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: p.color, marginBottom: 1 }}>
+                    {p.who}
+                  </div>
+                  <div style={{ fontSize: 11, color: C.fg2 }}>{p.text}</div>
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
 
-        <div>
+          <div>
+            <div
+              style={{
+                fontSize: 10, fontWeight: 600, textTransform: 'uppercase',
+                letterSpacing: '0.08em', color: C.fg3, marginBottom: 4,
+              }}
+            >
+              {t('valueMatrix')}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'center' }}>
+              <RadarChart />
+            </div>
+          </div>
+
           <div
             style={{
-              fontSize: 10, fontWeight: 600, textTransform: 'uppercase',
-              letterSpacing: '0.08em', color: C.fg3, marginBottom: 4,
+              borderRadius: 6,
+              border: `2px solid ${C.emerald}`,
+              padding: '12px 12px 14px',
+              background: C.emeraldLight,
+              animation: 'option-glow 2.5s ease-in-out infinite',
+              overflow: 'hidden',
+              boxSizing: 'border-box',
+              width: '100%',
+              maxWidth: '100%',
+              minWidth: 0,
+              flexShrink: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8,
             }}
           >
-            {t('valueMatrix')}
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'center' }}>
-            <RadarChart />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 0, minWidth: 0 }}>
+              <Icon name="sparkles" size={13} color={C.emerald} />
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: C.emerald,
+                  minWidth: 0,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {t('optionCLabel')}
+              </span>
+              <span
+                style={{
+                  fontSize: 9, fontWeight: 600,
+                  padding: '1px 5px', borderRadius: 9999,
+                  background: C.emerald, color: '#fff', marginLeft: 'auto',
+                  flexShrink: 0,
+                }}
+              >
+                {t('optionCNew')}
+              </span>
+            </div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: C.fg1 }}>
+              {t('optionCTitle')}
+            </div>
+            <div style={{ fontSize: 11, color: C.fg2, lineHeight: 1.55 }}>
+              {t('optionCDesc')}
+            </div>
+            <div style={{ display: 'flex', gap: 8, width: '100%', minWidth: 0 }}>
+              {[
+                { label: t('metaLeadTime'), value: '+3d',  good: false },
+                { label: t('metaRisk'),     value: '−72%', good: true },
+                { label: t('metaConf'),     value: '91%',  good: true },
+              ].map((m) => (
+                <div
+                  key={m.label}
+                  style={{
+                    flex: '1 1 0%',
+                    minWidth: 0,
+                    background: 'white', borderRadius: 4,
+                    padding: '5px 6px', textAlign: 'center',
+                    border: `1px solid ${C.emeraldBorder}`,
+                  }}
+                >
+                  <div style={{ fontSize: 12, fontWeight: 700, color: m.good ? C.emerald : C.amber }}>
+                    {m.value}
+                  </div>
+                  <div style={{ fontSize: 9, color: C.fg3 }}>{m.label}</div>
+                </div>
+              ))}
+            </div>
+            <div
+              style={{
+                display: 'flex',
+                gap: 8,
+                width: '100%',
+                minWidth: 0,
+                flexShrink: 0,
+              }}
+            >
+              <button
+                type="button"
+                disabled={voteSaving || !sprintVoteKeyOk}
+                onMouseEnter={() => setAppHov(true)}
+                onMouseLeave={() => setAppHov(false)}
+                onClick={handleApproveVoteClick}
+                style={{
+                  flex: '1 1 0%',
+                  minWidth: 0,
+                  padding: '9px 8px',
+                  borderRadius: 5,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  fontFamily: 'inherit',
+                  color: appHov ? '#fff' : C.emerald,
+                  background: appHov ? C.emeraldHover : 'transparent',
+                  border: `1px solid ${C.emerald}`,
+                  cursor: voteSaving || !sprintVoteKeyOk ? 'not-allowed' : 'pointer',
+                  opacity: voteSaving ? 0.75 : 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 6,
+                  boxShadow: 'none',
+                  transition: 'color 200ms ease, background-color 200ms ease, border-color 200ms ease',
+                  transform: appHov ? 'translateY(-1px)' : 'none',
+                }}
+              >
+                <Icon name="check" size={14} color={appHov ? '#fff' : C.emerald} />
+                {t('approveBtn')}
+              </button>
+              <button
+                type="button"
+                disabled={voteSaving || !sprintVoteKeyOk}
+                onMouseEnter={() => setOppHov(true)}
+                onMouseLeave={() => setOppHov(false)}
+                onClick={handleOpposeVoteClick}
+                style={{
+                  flex: '1 1 0%',
+                  minWidth: 0,
+                  padding: '9px 8px',
+                  borderRadius: 5,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  fontFamily: 'inherit',
+                  color: oppHov ? '#fff' : C.coral,
+                  background: oppHov ? C.coralHover : 'transparent',
+                  border: `1px solid ${C.coral}`,
+                  cursor: voteSaving || !sprintVoteKeyOk ? 'not-allowed' : 'pointer',
+                  opacity: voteSaving ? 0.75 : 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 6,
+                  boxShadow: 'none',
+                  transition: 'color 200ms ease, background-color 200ms ease, border-color 200ms ease',
+                  transform: oppHov ? 'translateY(-1px)' : 'none',
+                }}
+              >
+                <Icon name="x" size={14} color={oppHov ? '#fff' : C.coral} />
+                {t('opposeBtn')}
+              </button>
+            </div>
+            {showVoteWaitingOthers ? (
+              <div
+                style={{
+                  fontSize: 10,
+                  fontWeight: 600,
+                  color: C.fg2,
+                  textAlign: 'center',
+                  padding: '8px 6px',
+                  borderRadius: 4,
+                  background: 'rgba(255,255,255,0.75)',
+                  border: `1px solid ${C.emeraldBorder}`,
+                  lineHeight: 1.4,
+                }}
+              >
+                {t('voteWaitingOthers')}
+              </div>
+            ) : null}
+            <div
+              style={{
+                paddingTop: 8,
+                marginTop: 2,
+                borderTop: `1px solid rgba(30,138,90,0.25)`,
+                minWidth: 0,
+              }}
+            >
+              <div style={{ fontSize: 9, fontWeight: 700, color: C.fg3, marginBottom: 6 }}>
+                {t('voteParticipantsHeading')}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {!participants.length ? (
+                  <div style={{ fontSize: 10, color: C.fg4 }}>—</div>
+                ) : (
+                  participants.map((p) => {
+                    let status = 'pending';
+                    if (p.userId) {
+                      const v = voteMap[String(p.userId)];
+                      if (v === 'approve') status = 'approve';
+                      else if (v === 'oppose') status = 'oppose';
+                      else status = 'pending';
+                    }
+
+                    return (
+                      <div
+                        key={p.key}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: 10,
+                          minHeight: 20,
+                          minWidth: 0,
+                        }}
+                      >
+                        <span
+                          style={{
+                            flex: 1,
+                            fontSize: 11,
+                            color: C.fg2,
+                            overflow: 'hidden',
+                            whiteSpace: 'nowrap',
+                            textOverflow: 'ellipsis',
+                          }}
+                          title={p.label}
+                        >
+                          {p.label}
+                        </span>
+                        <span style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center' }}>
+                          {status === 'approve' ? (
+                            <Icon name="check" size={14} color={C.emerald} />
+                          ) : status === 'oppose' ? (
+                            <Icon name="x" size={14} color={C.coral} />
+                          ) : (
+                            <span
+                              style={{
+                                fontSize: 10,
+                                fontWeight: 600,
+                                letterSpacing: '0.02em',
+                                color: C.fg4,
+                              }}
+                            >
+                              {t('votePending')}
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
           </div>
         </div>
 
         <div
           style={{
-            borderRadius: 6, border: `2px solid ${C.emerald}`,
-            padding: '10px 12px', background: C.emeraldLight,
-            animation: 'option-glow 2.5s ease-in-out infinite',
+            flex: '0 0 150px',
+            minHeight: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            padding: '10px 12px',
+            background: C.subtle,
+            borderBottom: `1px solid ${C.borderSubtle}`,
+            position: 'relative',
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-            <Icon name="sparkles" size={13} color={C.emerald} />
-            <span style={{ fontSize: 11, fontWeight: 700, color: C.emerald }}>
-              {t('optionCLabel')}
-            </span>
-            <span
+          <textarea
+            aria-label={t('consensusNotePlaceholder')}
+            readOnly={memoLocked}
+            placeholder={t('consensusNotePlaceholder')}
+            value={noteDraft}
+            onChange={(e) => setNoteDraft(e.target.value)}
+            style={{
+              flex: 1,
+              minHeight: 0,
+              width: '100%',
+              resize: 'none',
+              borderRadius: 4,
+              border: `1px solid ${C.border}`,
+              padding: memoLocked ? '8px 10px 28px 10px' : '8px 10px',
+              fontSize: 11,
+              lineHeight: 1.45,
+              fontFamily: 'inherit',
+              color: C.fg1,
+              background: memoLocked ? C.subtle : C.white,
+              outline: 'none',
+              cursor: memoLocked ? 'default' : 'text',
+            }}
+          />
+          {memoLocked ? (
+            <button
+              type="button"
+              title={t('consensusEditMemo')}
+              aria-label={t('consensusEditMemo')}
+              onClick={() => setMemoLocked(false)}
               style={{
-                fontSize: 9, fontWeight: 600,
-                padding: '1px 5px', borderRadius: 9999,
-                background: C.emerald, color: '#fff', marginLeft: 'auto',
+                position: 'absolute',
+                right: 18,
+                bottom: 16,
+                width: 28,
+                height: 28,
+                borderRadius: 6,
+                border: `1px solid ${C.border}`,
+                background: C.white,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                boxShadow: '0 1px 3px rgba(30,42,53,0.08)',
               }}
             >
-              {t('optionCNew')}
-            </span>
-          </div>
-          <div style={{ fontSize: 12, fontWeight: 600, color: C.fg1, marginBottom: 4 }}>
-            {t('optionCTitle')}
-          </div>
-          <div style={{ fontSize: 11, color: C.fg2, lineHeight: 1.55, marginBottom: 8 }}>
-            {t('optionCDesc')}
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            {[
-              { label: t('metaLeadTime'), value: '+3d',  good: false },
-              { label: t('metaRisk'),     value: '−72%', good: true },
-              { label: t('metaConf'),     value: '91%',  good: true },
-            ].map((m) => (
-              <div
-                key={m.label}
-                style={{
-                  flex: 1, background: 'white', borderRadius: 4,
-                  padding: '5px 6px', textAlign: 'center',
-                  border: `1px solid ${C.emeraldBorder}`,
-                }}
-              >
-                <div style={{ fontSize: 12, fontWeight: 700, color: m.good ? C.emerald : C.amber }}>
-                  {m.value}
-                </div>
-                <div style={{ fontSize: 9, color: C.fg3 }}>{m.label}</div>
-              </div>
-            ))}
-          </div>
+              <Icon name="pencil" size={13} color={C.fg2} />
+            </button>
+          ) : null}
         </div>
       </div>
 
+      {!memoLocked ? (
+        <div
+          style={{
+            padding: '12px',
+            borderTop: `1px solid ${C.borderSubtle}`,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 6,
+          }}
+        >
+          <button
+            type="button"
+            disabled={!reachEnabled}
+            onClick={handleReachConsensusClick}
+            onMouseEnter={() => setConHov(true)}
+            onMouseLeave={() => setConHov(false)}
+            style={{
+              width: '100%',
+              padding: '9px',
+              borderRadius: 5,
+              fontSize: 12,
+              fontWeight: 600,
+              fontFamily: 'inherit',
+              color: reachEnabled ? C.emerald : C.fg4,
+              background: reachEnabled ? (conHov ? C.emeraldLight : C.white) : '#F1F4F8',
+              border: `1px solid ${reachEnabled ? C.emeraldBorder : C.borderSubtle}`,
+              cursor: reachEnabled ? 'pointer' : 'not-allowed',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 7,
+              transition: 'all 160ms',
+              opacity: reachEnabled ? 1 : 0.85,
+            }}
+          >
+            <Icon name="sparkles" size={14} color={reachEnabled ? C.emerald : C.fg4} />{' '}
+            {savingMemo ? '…' : t('reachConsensusBtn')}
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// ─── Sprint timeline panel ───────────────────────────────────
+const TIMELINE_SPRINT_GAP = 16;
+const TIMELINE_DOT = 34;
+const TIMELINE_SPRINT_STEP = TIMELINE_DOT + TIMELINE_SPRINT_GAP;
+/** Arrow click: slide by three sprint column widths. */
+const TIMELINE_ARROW_DELTA = TIMELINE_SPRINT_STEP * 3;
+const TIMELINE_ROW_H = TIMELINE_DOT + 14;
+const TIMELINE_ARROW_BTN_W = 38;
+const TIMELINE_FADE_W = 44;
+
+function SprintTimelinePanel({
+  timelineAnchorSeed,
+  currentSprint,
+  viewingSprint,
+  onSprintSelect,
+  onRequestDeleteSprint,
+}) {
+  const { t } = useLang();
+  const menuRef = useRef(null);
+  const anchoredSeedRef = useRef('');
+  const viewportWrapRef = useRef(null);
+  const [viewportW, setViewportW] = useState(320);
+
+  const sprintNum = Number.isFinite(Number(currentSprint)) ? Number(currentSprint) : 0;
+  const sprints = [];
+  for (let i = 1; i <= sprintNum; i += 1) sprints.push(i);
+  const [menuState, setMenuState] = useState({ open: false, x: 0, y: 0, sprintNumber: null });
+  const [scrollX, setScrollX] = useState(0);
+
+  useLayoutEffect(() => {
+    const el = viewportWrapRef.current;
+    if (!el) return undefined;
+    const sync = () => setViewportW(Math.max(1, Math.round(el.getBoundingClientRect().width)));
+    sync();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver(sync);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const contentWidth =
+    sprintNum <= 0 ? 0 : sprintNum * TIMELINE_DOT + (sprintNum - 1) * TIMELINE_SPRINT_GAP;
+  const overflow = Math.max(0, contentWidth - viewportW);
+  const minScrollX = overflow > 0 ? -(contentWidth - viewportW) : 0;
+
+  const anchorProjectPrefix = timelineAnchorSeed.includes('|')
+    ? timelineAnchorSeed.slice(0, timelineAnchorSeed.indexOf('|'))
+    : '';
+
+  useEffect(() => {
+    anchoredSeedRef.current = '';
+  }, [anchorProjectPrefix]);
+
+  useLayoutEffect(() => {
+    if (!timelineAnchorSeed || sprintNum <= 0) return;
+    if (timelineAnchorSeed.endsWith('|pending')) return;
+    if (anchoredSeedRef.current === timelineAnchorSeed) return;
+    anchoredSeedRef.current = timelineAnchorSeed;
+    setScrollX(overflow > 0 ? minScrollX : 0);
+  }, [timelineAnchorSeed, sprintNum, overflow, minScrollX]);
+
+  useEffect(() => {
+    setScrollX((sx) => Math.max(minScrollX, Math.min(0, sx)));
+  }, [minScrollX]);
+
+  useEffect(() => {
+    if (!menuState.open) return undefined;
+    function onDocDown(ev) {
+      if (menuRef.current && !menuRef.current.contains(ev.target)) {
+        setMenuState({ open: false, x: 0, y: 0, sprintNumber: null });
+      }
+    }
+    document.addEventListener('mousedown', onDocDown);
+    return () => document.removeEventListener('mousedown', onDocDown);
+  }, [menuState.open]);
+
+  function clampTimelineScroll(next) {
+    return Math.max(minScrollX, Math.min(0, next));
+  }
+
+  function bumpTimelineBySprints(direction) {
+    const delta =
+      TIMELINE_ARROW_DELTA *
+      // direction -1 → earlier sprints visible (positive scroll)
+      // direction +1 → later sprints (negative scroll)
+      (direction < 0 ? 1 : -1);
+    setScrollX((sx) => clampTimelineScroll(sx + delta));
+  }
+
+  const innerTransitionStyle = 'transform 300ms ease';
+  const fadeBase = {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    width: TIMELINE_ARROW_BTN_W + TIMELINE_FADE_W,
+    zIndex: 18,
+    pointerEvents: 'none',
+  };
+
+  const atLeftEnd = overflow <= 0 || scrollX >= -0.5;
+  const atRightEnd = overflow <= 0 || scrollX <= minScrollX + 0.5;
+  const showScrollChrome = overflow > 0;
+
+  return (
+    <div
+      style={{
+        flex: '1 1 0%',
+        minWidth: 0,
+        width: '100%',
+        position: 'relative',
+        background: 'transparent',
+        padding: 0,
+        overflow: 'visible',
+        pointerEvents: 'auto',
+      }}
+    >
       <div
-        style={{
-          padding: '12px', borderTop: `1px solid ${C.borderSubtle}`,
-          display: 'flex', flexDirection: 'column', gap: 6,
-        }}
+        ref={viewportWrapRef}
+        style={{ position: 'relative', width: '100%', height: TIMELINE_ROW_H }}
       >
-        <button
-          onClick={onApprove}
-          onMouseEnter={() => setAppHov(true)}
-          onMouseLeave={() => setAppHov(false)}
+        <div
           style={{
-            width: '100%', padding: '10px', borderRadius: 5,
-            fontSize: 13, fontWeight: 600, color: '#fff',
-            background: appHov ? C.emeraldHover : C.emerald,
-            border: 'none', cursor: 'pointer',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
-            boxShadow: appHov
-              ? '0 4px 12px rgba(30,138,90,0.35)'
-              : '0 2px 6px rgba(30,138,90,0.25)',
-            transition: 'all 160ms',
-            transform: appHov ? 'translateY(-1px)' : 'none',
+            position: 'absolute',
+            inset: 0,
+            overflow: 'hidden',
+            borderRadius: 6,
           }}
         >
-          <Icon name="check" size={15} color="#fff" /> {t('approveBtn')}
-        </button>
-        <button
-          onClick={onReject}
-          onMouseEnter={() => setRejHov(true)}
-          onMouseLeave={() => setRejHov(false)}
-          style={{
-            width: '100%', padding: '9px', borderRadius: 5,
-            fontSize: 12, fontWeight: 500, color: C.coral,
-            background: rejHov ? C.coralLight : C.white,
-            border: `1px solid ${C.coralBorder}`, cursor: 'pointer',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
-            transition: 'all 160ms',
-          }}
-        >
-          <Icon name="x" size={14} /> {t('rejectBtn')}
-        </button>
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: TIMELINE_SPRINT_GAP,
+              transform: `translateX(${scrollX}px)`,
+              transition: innerTransitionStyle,
+              position: 'relative',
+              height: '100%',
+              width: contentWidth || undefined,
+              minHeight: TIMELINE_DOT,
+            }}
+          >
+          <div
+            aria-hidden="true"
+            style={{
+              position: 'absolute',
+              left: TIMELINE_DOT / 2,
+              top: '50%',
+              height: 2,
+              background: C.borderSubtle,
+              transform: 'translateY(-50%)',
+              zIndex: 0,
+              borderRadius: 1,
+              width:
+                sprintNum <= 1 ? 0 : (sprintNum - 1) * TIMELINE_SPRINT_STEP,
+            }}
+          />
+
+          {sprints.map((num) => {
+            const isPast = num < sprintNum;
+            const isCurrent = num === sprintNum;
+            const isViewing = num === Number(viewingSprint);
+
+            const circleBg = isCurrent ? C.emerald : isPast ? C.subtle : C.white;
+            const circleBorder = isCurrent ? C.emerald : isPast ? C.borderSubtle : C.border;
+            const labelColor = isCurrent ? '#fff' : isPast ? C.fg3 : C.fg4;
+
+            return (
+              <div
+                key={num}
+                style={{
+                  position: 'relative',
+                  zIndex: 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => onSprintSelect(num)}
+                  onContextMenu={(e) => {
+                    const canDelete = num === sprintNum && sprintNum > 1;
+                    if (!canDelete) return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setMenuState({
+                      open: true,
+                      x: e.clientX,
+                      y: e.clientY,
+                      sprintNumber: num,
+                    });
+                  }}
+                  title={`Sprint #${num}`}
+                  style={{
+                    width: TIMELINE_DOT,
+                    height: TIMELINE_DOT,
+                    borderRadius: '50%',
+                    background: circleBg,
+                    border: `2px solid ${circleBorder}`,
+                    color: labelColor,
+                    fontSize: 10.5,
+                    fontWeight: 700,
+                    letterSpacing: 0.2,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    boxShadow: isCurrent
+                      ? '0 0 0 4px rgba(30,138,90,0.18), 0 2px 6px rgba(30,138,90,0.25)'
+                      : isViewing
+                      ? '0 0 0 3px rgba(58,74,88,0.2)'
+                      : 'none',
+                    transition: 'all 180ms ease',
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                    padding: 0,
+                  }}
+                >
+                  #{num}
+                </button>
+
+                {isPast ? (
+                  <div
+                    aria-hidden="true"
+                    style={{
+                      position: 'absolute',
+                      right: 6,
+                      bottom: -1,
+                      width: 14,
+                      height: 14,
+                      borderRadius: '50%',
+                      background: C.emerald,
+                      border: '2px solid #fff',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      boxShadow: '0 1px 3px rgba(30,138,90,0.35)',
+                    }}
+                  >
+                    <Icon name="check" size={8} color="#fff" />
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+        </div>
+
+        {showScrollChrome && !atLeftEnd ? (
+          <div
+            aria-hidden="true"
+            style={{
+              ...fadeBase,
+              left: 0,
+              background: 'linear-gradient(to right, #ffffff 0%, rgba(255,255,255,0.88) 38%, transparent 100%)',
+            }}
+          />
+        ) : null}
+        {showScrollChrome && !atRightEnd ? (
+          <div
+            aria-hidden="true"
+            style={{
+              ...fadeBase,
+              right: 0,
+              background:
+                'linear-gradient(to left, #ffffff 0%, rgba(255,255,255,0.88) 38%, transparent 100%)',
+            }}
+          />
+        ) : null}
+
+        {showScrollChrome && !atLeftEnd ? (
+          <button
+            type="button"
+            aria-label="Earlier sprints"
+            onClick={() => bumpTimelineBySprints(-1)}
+            style={{
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              bottom: 0,
+              width: TIMELINE_ARROW_BTN_W,
+              zIndex: 22,
+              borderRadius: '6px 0 0 6px',
+              border: 'none',
+              borderRight: `1px solid ${C.borderSubtle}`,
+              background: 'rgba(255,255,255,0.82)',
+              boxShadow: '4px 0 12px rgba(248,250,252,0.95)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: 0,
+              cursor: 'pointer',
+            }}
+          >
+            <Icon name="chevron-left" size={16} color={C.fg2} />
+          </button>
+        ) : null}
+        {showScrollChrome && !atRightEnd ? (
+          <button
+            type="button"
+            aria-label="Later sprints"
+            onClick={() => bumpTimelineBySprints(1)}
+            style={{
+              position: 'absolute',
+              right: 0,
+              top: 0,
+              bottom: 0,
+              width: TIMELINE_ARROW_BTN_W,
+              zIndex: 22,
+              borderRadius: '0 6px 6px 0',
+              border: 'none',
+              borderLeft: `1px solid ${C.borderSubtle}`,
+              background: 'rgba(255,255,255,0.82)',
+              boxShadow: '-4px 0 12px rgba(248,250,252,0.95)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: 0,
+              cursor: 'pointer',
+            }}
+          >
+            <Icon name="chevron-right" size={16} color={C.fg2} />
+          </button>
+        ) : null}
       </div>
+
+      {menuState.open ? (
+        <div
+          ref={menuRef}
+          style={{
+            position: 'fixed',
+            left: menuState.x,
+            top: menuState.y,
+            transform: 'translate(6px, 6px)',
+            zIndex: 100100,
+            minWidth: 124,
+            background: C.white,
+            border: `1px solid ${C.borderSubtle}`,
+            borderRadius: 8,
+            boxShadow: '0 10px 26px rgba(30,42,53,0.16)',
+            padding: 6,
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => {
+              const sprintNumber = menuState.sprintNumber;
+              setMenuState({ open: false, x: 0, y: 0, sprintNumber: null });
+              if (Number.isFinite(Number(sprintNumber))) {
+                onRequestDeleteSprint(Number(sprintNumber));
+              }
+            }}
+            style={{
+              width: '100%',
+              border: 'none',
+              background: 'transparent',
+              textAlign: 'left',
+              borderRadius: 6,
+              padding: '7px 8px',
+              fontSize: 12,
+              color: C.coral,
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+            }}
+          >
+            {t('deleteSprintBtn')}
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1927,6 +3009,7 @@ export default function WorkspacePage() {
   const { t } = useLang();
   const navigate = useNavigate();
   const { projectId } = useParams();
+  const location = useLocation();
   const fallbackProject = getProjectById(projectId) || DEFAULT_PROJECT;
   const [projectMeta, setProjectMeta] = useState(null);
   const [savingMeta, setSavingMeta] = useState(false);
@@ -1938,6 +3021,16 @@ export default function WorkspacePage() {
   const [descriptionDraft, setDescriptionDraft] = useState('');
   const [designImage, setDesignImage] = useState({ id: null, url: '', storagePath: '' });
   const [uploadState, setUploadState] = useState({ status: 'idle', message: '' });
+  const [viewingSprint, setViewingSprint] = useState(
+    location.state?.sprintNumber ?? null,
+  );
+  const [deleteSprintTarget, setDeleteSprintTarget] = useState(null);
+  const [chatWidth, setChatWidth] = useState(230);
+  const [conflictWidth, setConflictWidth] = useState(230);
+  const [chatHandleHov, setChatHandleHov] = useState(false);
+  const [conflictHandleHov, setConflictHandleHov] = useState(false);
+  const chatResizeRef = useRef(null);
+  const conflictResizeRef = useRef(null);
 
   useEffect(() => {
     let alive = true;
@@ -1950,7 +3043,7 @@ export default function WorkspacePage() {
 
       const { data, error } = await supabase
         .from('projects')
-        .select('id, name, description, status, progress, sprint_number')
+        .select('id, name, description, status, progress, sprint_number, consensus_note, user_id')
         .eq('id', projectId)
         .single();
 
@@ -1985,6 +3078,11 @@ export default function WorkspacePage() {
   }, [projectMeta, fallbackProject.name, fallbackProject.sprint]);
 
   useEffect(() => {
+    const current = Number(projectMeta?.sprint_number ?? fallbackProject.sprint ?? 0);
+    setViewingSprint((prev) => (prev == null ? current : prev));
+  }, [projectMeta?.sprint_number, fallbackProject.sprint]);
+
+  useEffect(() => {
     if (!projectId) return undefined;
     const channel = supabase
       .channel(`workspace-project-meta-${projectId}`)
@@ -2005,7 +3103,7 @@ export default function WorkspacePage() {
   }, [projectId]);
 
   async function updateProjectFields(patch) {
-    if (!projectId || !patch || Object.keys(patch).length === 0) return;
+    if (!projectId || !patch || Object.keys(patch).length === 0) return false;
     const normalizedPatch = {
       ...patch,
       ...(typeof patch.status === 'string'
@@ -2017,15 +3115,16 @@ export default function WorkspacePage() {
       .from('projects')
       .update(normalizedPatch)
       .eq('id', projectId)
-      .select('id, name, description, status, progress, sprint_number')
+      .select('id, name, description, status, progress, sprint_number, consensus_note')
       .single();
     setSavingMeta(false);
     if (error) {
       // eslint-disable-next-line no-console
       console.error('[WorkspacePage] project update failed', error);
-      return;
+      return false;
     }
     setProjectMeta((prev) => ({ ...(prev || {}), ...(data || normalizedPatch) }));
+    return true;
   }
 
   async function commitNameEdit() {
@@ -2047,6 +3146,7 @@ export default function WorkspacePage() {
     }
     const currentSprint = Number(projectMeta?.sprint_number ?? fallbackProject.sprint ?? 0);
     if (parsed === currentSprint) return;
+    setViewingSprint(parsed);
     await updateProjectFields({ sprint_number: parsed });
   }
 
@@ -2059,22 +3159,93 @@ export default function WorkspacePage() {
     await updateProjectFields({ description: nextDescription });
   }
 
+  async function handleAddSprint() {
+    const currentSprint = Number(projectMeta?.sprint_number ?? fallbackProject.sprint ?? 0);
+    const nextSprint = currentSprint + 1;
+    setDesignImage({ id: null, url: '', storagePath: '' });
+    setViewingSprint(nextSprint);
+
+    if (projectId) {
+      const { error: cleanupDesignError } = await supabase
+        .from('design_files')
+        .delete()
+        .eq('project_id', projectId)
+        .gt('sprint_number', currentSprint);
+      if (cleanupDesignError) {
+        // eslint-disable-next-line no-console
+        console.error('[WorkspacePage] cleanup future design_files failed', cleanupDesignError);
+      }
+      const { error: cleanupMarkerError } = await supabase
+        .from('markers')
+        .delete()
+        .eq('project_id', projectId)
+        .gt('sprint_number', currentSprint);
+      if (cleanupMarkerError) {
+        // eslint-disable-next-line no-console
+        console.error('[WorkspacePage] cleanup future markers failed', cleanupMarkerError);
+      }
+    }
+
+    await updateProjectFields({ sprint_number: nextSprint });
+  }
+
+  async function confirmDeleteSprint() {
+    const sprintToDelete = Number(deleteSprintTarget);
+    const currentSprint = Number(projectMeta?.sprint_number ?? fallbackProject.sprint ?? 0);
+    if (!projectId || !Number.isFinite(sprintToDelete)) return;
+    if (sprintToDelete !== currentSprint || currentSprint <= 1) {
+      setDeleteSprintTarget(null);
+      return;
+    }
+    const previousSprint = currentSprint - 1;
+    setDeleteSprintTarget(null);
+    setViewingSprint(previousSprint);
+    setDesignImage({ id: null, url: '', storagePath: '' });
+
+    const { error: deleteDesignError } = await supabase
+      .from('design_files')
+      .delete()
+      .eq('project_id', projectId)
+      .eq('sprint_number', sprintToDelete);
+    if (deleteDesignError) {
+      // eslint-disable-next-line no-console
+      console.error('[WorkspacePage] delete sprint design_files failed', deleteDesignError);
+    }
+
+    const { error: deleteMarkerError } = await supabase
+      .from('markers')
+      .delete()
+      .eq('project_id', projectId)
+      .eq('sprint_number', sprintToDelete);
+    if (deleteMarkerError) {
+      // eslint-disable-next-line no-console
+      console.error('[WorkspacePage] delete sprint markers failed', deleteMarkerError);
+    }
+
+    await updateProjectFields({ sprint_number: previousSprint });
+  }
+
   useEffect(() => {
     async function loadLatestDesign() {
+      if (!Number.isFinite(Number(viewingSprint))) {
+        setDesignImage({ id: null, url: '', storagePath: '' });
+        return;
+      }
       let base = supabase
         .from('design_files')
-        .select('id, file_url, created_at, project_id')
+        .select('id, file_url, created_at, project_id, sprint_number')
         .order('created_at', { ascending: false })
         .limit(1);
       let query = projectId ? base.eq('project_id', projectId) : base;
+      query = query.eq('sprint_number', Number(viewingSprint));
       let { data, error } = await query;
       if (error && /project_id/i.test(error.message || '')) {
         base = supabase
           .from('design_files')
-          .select('id, file_url, created_at')
+          .select('id, file_url, created_at, sprint_number')
           .order('created_at', { ascending: false })
           .limit(1);
-        ({ data, error } = await base);
+        ({ data, error } = await base.eq('sprint_number', Number(viewingSprint)));
       }
       if (error) return;
       const row = data?.[0];
@@ -2091,8 +3262,11 @@ export default function WorkspacePage() {
         (payload) => {
           const next = payload.new || {};
           if (projectId && String(next.project_id) !== String(projectId)) return;
+          if (Number(next.sprint_number) !== Number(viewingSprint)) return;
           const nextUrl = next.file_url || next.url;
-          if (nextUrl) setDesignImage(mapDesignFileRow(next));
+          if (nextUrl) {
+            setDesignImage(mapDesignFileRow(next));
+          }
         },
       )
       .on(
@@ -2101,6 +3275,7 @@ export default function WorkspacePage() {
         (payload) => {
           const prev = payload.old || {};
           if (projectId && String(prev.project_id) !== String(projectId)) return;
+          if (Number(prev.sprint_number) !== Number(viewingSprint)) return;
           const deletedId = prev.id || null;
           setDesignImage((curr) => {
             if (!curr.url) return curr;
@@ -2116,7 +3291,11 @@ export default function WorkspacePage() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [projectId]);
+  }, [projectId, viewingSprint]);
+
+  function handleSprintSelect(nextSprint) {
+    setViewingSprint(Number(nextSprint));
+  }
 
   async function onUploadImage(e) {
     const file = e.target.files?.[0];
@@ -2141,10 +3320,14 @@ export default function WorkspacePage() {
       return;
     }
 
+    const targetSprint = Number.isFinite(Number(viewingSprint))
+      ? Number(viewingSprint)
+      : Number(projectMeta?.sprint_number ?? fallbackProject.sprint ?? 0);
     let { error } = await supabase.from('design_files').insert({
       file_url: publicUrl,
       file_name: file.name,
       project_id: projectId || null,
+      sprint_number: targetSprint,
     });
 
     // Fallback when table uses `url` instead of `file_url`.
@@ -2153,6 +3336,7 @@ export default function WorkspacePage() {
         url: publicUrl,
         file_name: file.name,
         project_id: projectId || null,
+        sprint_number: targetSprint,
       });
       error = fallback.error;
     }
@@ -2336,20 +3520,228 @@ export default function WorkspacePage() {
         }
         status={normalizedStatus || undefined}
       />
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden', minWidth: 0 }}>
-        <BlueprintViewer
-          projectId={projectId}
-          designImageUrl={designImage.url}
-          onUploadImage={onUploadImage}
-          onDeleteImage={onDeleteImage}
-          uploadState={uploadState}
+      <div
+        style={{
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'row',
+          alignItems: 'stretch',
+          overflow: 'hidden',
+          minWidth: 0,
+          minHeight: 0,
+        }}
+      >
+        <div
+          style={{
+            flex: 1,
+            minWidth: 0,
+            minHeight: 0,
+            display: 'flex',
+            flexDirection: 'column',
+          }}
+        >
+          <BlueprintViewer
+            projectId={projectId}
+            timelineAnchorSeed={
+              projectId != null ? `${projectId}|${projectMeta?.sprint_number ?? 'pending'}` : ''
+            }
+            designImageUrl={designImage.url}
+            onUploadImage={onUploadImage}
+            onDeleteImage={onDeleteImage}
+            uploadState={uploadState}
+            currentSprint={projectMeta?.sprint_number ?? fallbackProject.sprint ?? 0}
+            viewingSprint={viewingSprint}
+            onSprintSelect={handleSprintSelect}
+            onRequestDeleteSprint={(sprintNumber) => setDeleteSprintTarget(sprintNumber)}
+          />
+        </div>
+
+        {/* Chat 왼쪽 4px 리사이저 */}
+        <div
+          onPointerDown={(e) => {
+            if (e.button !== 0) return;
+            e.preventDefault();
+            try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* noop */ }
+            chatResizeRef.current = {
+              pointerId: e.pointerId,
+              startX: e.clientX,
+              startWidth: chatWidth,
+            };
+          }}
+          onPointerMove={(e) => {
+            const r = chatResizeRef.current;
+            if (!r || r.pointerId !== e.pointerId) return;
+            const dx = e.clientX - r.startX;
+            setChatWidth(Math.max(230, r.startWidth - dx));
+          }}
+          onPointerUp={(e) => {
+            const r = chatResizeRef.current;
+            if (!r || r.pointerId !== e.pointerId) return;
+            try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* noop */ }
+            chatResizeRef.current = null;
+          }}
+          onPointerCancel={(e) => {
+            const r = chatResizeRef.current;
+            if (!r || r.pointerId !== e.pointerId) return;
+            try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* noop */ }
+            chatResizeRef.current = null;
+          }}
+          onMouseEnter={() => setChatHandleHov(true)}
+          onMouseLeave={() => setChatHandleHov(false)}
+          style={{
+            width: 4,
+            flexShrink: 0,
+            alignSelf: 'stretch',
+            cursor: 'col-resize',
+            background: chatHandleHov ? '#2563EB' : 'transparent',
+            touchAction: 'none',
+            userSelect: 'none',
+            WebkitUserSelect: 'none',
+            transition: 'background 120ms',
+          }}
         />
-        <ChatPanel projectId={projectId} senderRole="engineer" />
+
+        <ChatPanel width={chatWidth} projectId={projectId} senderRole="engineer" />
+
+        {/* Conflict 왼쪽 8px 리사이저 */}
+        <div
+          onPointerDown={(e) => {
+            if (e.button !== 0) return;
+            e.preventDefault();
+            try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* noop */ }
+            conflictResizeRef.current = {
+              pointerId: e.pointerId,
+              startX: e.clientX,
+              startWidth: conflictWidth,
+            };
+          }}
+          onPointerMove={(e) => {
+            const r = conflictResizeRef.current;
+            if (!r || r.pointerId !== e.pointerId) return;
+            const dx = e.clientX - r.startX;
+            setConflictWidth(Math.max(230, r.startWidth - dx));
+          }}
+          onPointerUp={(e) => {
+            const r = conflictResizeRef.current;
+            if (!r || r.pointerId !== e.pointerId) return;
+            try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* noop */ }
+            conflictResizeRef.current = null;
+          }}
+          onPointerCancel={(e) => {
+            const r = conflictResizeRef.current;
+            if (!r || r.pointerId !== e.pointerId) return;
+            try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* noop */ }
+            conflictResizeRef.current = null;
+          }}
+          onMouseEnter={() => setConflictHandleHov(true)}
+          onMouseLeave={() => setConflictHandleHov(false)}
+          style={{
+            width: 8,
+            flexShrink: 0,
+            alignSelf: 'stretch',
+            cursor: 'col-resize',
+            background: conflictHandleHov ? '#2563EB' : 'transparent',
+            touchAction: 'none',
+            userSelect: 'none',
+            WebkitUserSelect: 'none',
+            transition: 'background 120ms',
+          }}
+        />
+
         <ConflictPanel
-          onApprove={() => navigate(`/project/${resolvedProject.id}/consensus`)}
+          key={String(projectId)}
+          width={conflictWidth}
+          projectId={projectId}
+          sprintNumber={
+            Number.isFinite(Number(viewingSprint)) ? Number(viewingSprint) : null
+          }
+          ownerUserId={projectMeta?.user_id ?? null}
+          consensusNote={projectMeta?.consensus_note ?? ''}
+          onSaveConsensusNote={(text) => updateProjectFields({ consensus_note: text })}
+          onApprove={async () => {
+            await handleAddSprint();
+            navigate(`/project/${resolvedProject.id}/consensus`);
+          }}
+          onReachConsensus={async () => {
+            await handleAddSprint();
+            navigate(`/project/${resolvedProject.id}/consensus`);
+          }}
           onReject={() => {}}
         />
       </div>
+      {deleteSprintTarget ? (
+        <div
+          role="presentation"
+          onClick={() => setDeleteSprintTarget(null)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(19,28,36,0.42)',
+            zIndex: 120,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 16,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: '100%',
+              maxWidth: 420,
+              background: C.white,
+              border: `1px solid ${C.borderSubtle}`,
+              borderRadius: 8,
+              boxShadow: '0 20px 48px rgba(19,28,36,0.26)',
+              padding: 16,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 12,
+            }}
+          >
+            <div style={{ fontSize: 13, lineHeight: 1.55, color: C.fg1 }}>
+              {t('deleteSprintConfirm')}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button
+                type="button"
+                onClick={() => setDeleteSprintTarget(null)}
+                style={{
+                  height: 30,
+                  borderRadius: 4,
+                  border: `1px solid ${C.border}`,
+                  background: C.white,
+                  color: C.fg2,
+                  padding: '0 10px',
+                  cursor: 'pointer',
+                  fontSize: 12,
+                  fontFamily: 'inherit',
+                }}
+              >
+                {t('hubCreateCancel')}
+              </button>
+              <button
+                type="button"
+                onClick={confirmDeleteSprint}
+                style={{
+                  height: 30,
+                  borderRadius: 4,
+                  border: 'none',
+                  background: C.coral,
+                  color: '#fff',
+                  padding: '0 10px',
+                  cursor: 'pointer',
+                  fontSize: 12,
+                  fontFamily: 'inherit',
+                  fontWeight: 600,
+                }}
+              >
+                {t('deleteSprintConfirmBtn')}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </>
   );
 }

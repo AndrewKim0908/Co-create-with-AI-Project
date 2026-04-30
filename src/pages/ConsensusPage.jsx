@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import Header from '@/components/Header';
@@ -6,18 +7,41 @@ import Icon from '@/components/Icon';
 import { C } from '@/constants/colors';
 import { getProjectById, DEFAULT_PROJECT } from '@/constants/projects';
 import { useLang } from '@/i18n/LangContext';
+import { supabase } from '@/lib/supabase';
 
 export default function ConsensusPage() {
   const { t } = useLang();
   const navigate = useNavigate();
   const { projectId } = useParams();
   const project = getProjectById(projectId) || DEFAULT_PROJECT;
-  const goBack = () => navigate(`/project/${project.id}/sprints`);
+
+  const [consensusNote, setConsensusNote] = useState(null);
+  const [latestSprint, setLatestSprint] = useState(null);
+
+  useEffect(() => {
+    if (!projectId) return;
+    supabase
+      .from('projects')
+      .select('consensus_note, sprint_number')
+      .eq('id', projectId)
+      .single()
+      .then(({ data }) => {
+        if (data?.consensus_note) setConsensusNote(data.consensus_note);
+        if (data?.sprint_number != null) setLatestSprint(data.sprint_number);
+      });
+  }, [projectId]);
+
+  const goBack = () =>
+    navigate(`/project/${projectId}/sprints`, {
+      state: latestSprint != null ? { sprintNumber: latestSprint } : undefined,
+    });
+
+  const outcomeValue = consensusNote ?? t('drOutcomeVal');
 
   const rows = [
     { label: t('drConflict'),   value: t('drConflictVal') },
     { label: t('drResolution'), value: t('drResolutionVal') },
-    { label: t('drOutcome'),    value: t('drOutcomeVal') },
+    { label: t('drOutcome'),    value: outcomeValue },
     { label: t('drApprovals'),  value: t('drApprovalsVal') },
   ];
 

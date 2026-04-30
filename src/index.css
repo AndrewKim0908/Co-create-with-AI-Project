@@ -47,3 +47,9 @@
   from { opacity: 0; transform: translateX(16px); }
   to   { opacity: 1; transform: translateX(0); }
 }
+@keyframes conflict-spin {
+  to { transform: rotate(360deg); }
+}
+.conflict-spin {
+  animation: conflict-spin 0.75s linear infinite;
+}

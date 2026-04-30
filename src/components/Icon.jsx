@@ -3,7 +3,8 @@ import {
   Settings, HelpCircle, ChevronsUpDown, ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
   Cpu, PenTool, UserCheck, UserPlus, ArrowRight, Check, X, Plus, Sparkles,
   MessageSquare, Send, Loader, CheckCircle, XCircle, FileText,
-  Download, ZoomIn, ZoomOut, Maximize2, Layers, Eye, EyeOff, Mail, Lock, House, MoreVertical, Upload, Hand,
+  Download, ZoomIn, ZoomOut, Maximize2, Layers, Eye, EyeOff, Mail, Lock, House, MoreVertical, Upload,   Hand,
+  Pencil,
   Thermometer, Palette, Shield, ClipboardCheck, Package, Hammer, Search, Briefcase,
 } from 'lucide-react';
 
@@ -58,16 +59,24 @@ const MAP = {
   'more-vertical': MoreVertical,
   upload: Upload,
   hand: Hand,
+  pencil: Pencil,
 };
 
-export default function Icon({ name, size = 16, color, style = {}, className = '' }) {
+export default function Icon({
+  name,
+  size = 16,
+  color,
+  strokeWidth = 2,
+  style = {},
+  className = '',
+}) {
   const Cmp = MAP[name];
   if (!Cmp) return null;
   return (
     <Cmp
       size={size}
       color={color}
-      strokeWidth={2}
+      strokeWidth={strokeWidth}
       style={{ flexShrink: 0, ...style }}
       className={className}
       aria-hidden="true"
