@@ -3237,6 +3237,32 @@ export default function WorkspacePage() {
     .toLowerCase()
     .trim();
 
+  /** Matches header “Sprint #…”; timeline `viewingSprint` can differ when browsing past dots. sprint_votes use this sprint. */
+  const workspaceCanonicalSprint = Number(projectMeta?.sprint_number ?? fallbackProject.sprint ?? 0);
+  const conflictPanelSprintNumber =
+    Number.isFinite(workspaceCanonicalSprint) && workspaceCanonicalSprint >= 1
+      ? Math.trunc(workspaceCanonicalSprint)
+      : null;
+
+  useEffect(() => {
+    if (!projectId) return;
+    // eslint-disable-next-line no-console
+    console.log('[WorkspacePage] ConflictPanel sprintNumber wiring', {
+      projectMetaSprintRaw: projectMeta?.sprint_number ?? null,
+      fallbackProjectSprint: fallbackProject.sprint ?? null,
+      workspaceCanonicalSprint,
+      viewingSprintTimeline: viewingSprint,
+      sprintNumberPassedToConflictPanel: conflictPanelSprintNumber,
+    });
+  }, [
+    projectId,
+    projectMeta?.sprint_number,
+    fallbackProject.sprint,
+    workspaceCanonicalSprint,
+    viewingSprint,
+    conflictPanelSprintNumber,
+  ]);
+
   useEffect(() => {
     setNameDraft(projectMeta?.name || fallbackProject.name || '');
     setSprintDraft(String(projectMeta?.sprint_number ?? fallbackProject.sprint ?? ''));
@@ -3837,9 +3863,7 @@ export default function WorkspacePage() {
           key={String(projectId)}
           width={conflictWidth}
           projectId={projectId}
-          sprintNumber={
-            Number.isFinite(Number(viewingSprint)) ? Number(viewingSprint) : null
-          }
+          sprintNumber={conflictPanelSprintNumber}
           ownerUserId={projectMeta?.user_id ?? null}
           consensusNote={projectMeta?.consensus_note ?? ''}
           onSaveConsensusNote={(text) => updateProjectFields({ consensus_note: text })}
