@@ -1912,6 +1912,13 @@ function ConflictPanel({
   const [voteMap, setVoteMap] = useState({});
   const [authUid, setAuthUid] = useState(null);
   const unanimousNavLockRef = useRef(false);
+  /** Broadcast + postgres listener share this subscription (postges may not reach peer clients under some RLS/Realtime setups). */
+  const voteSyncChannelRef = useRef(null);
+  const onApproveRef = useRef(onApprove);
+
+  useEffect(() => {
+    onApproveRef.current = onApprove;
+  }, [onApprove]);
 
   const sprintVoteKeyOk = Boolean(
     projectId && resolveSprintVotesSprintNumber(sprintNumber) != null,
@@ -2098,58 +2105,101 @@ function ConflictPanel({
     return ids.every((userId) => votesMap[userId] === 'approve');
   }
 
-  async function finalizeConsensusIfUnanimousFromApproveClick() {
-    if (!authUid || !sprintVoteKeyOk) return;
-    const votesMapFresh = await loadVotes();
-    const participantsListFresh = await loadParticipants();
+  const runUnanimousConsensusCheck = useCallback(
+    async (source) => {
+      // eslint-disable-next-line no-console
+      console.log('[ConflictPanel][SYNC] unanimous check:start', {
+        source,
+        projectId,
+        sprintNumber,
+        authUidPresent: !!authUid,
+        sprintVoteKeyOk,
+      });
+      if (!authUid || !sprintVoteKeyOk) {
+        // eslint-disable-next-line no-console
+        console.log('[ConflictPanel][SYNC] unanimous check:skip (auth or sprint key)');
+        return;
+      }
 
-    const requiredIds = [];
-    participantsListFresh.forEach((p) => {
-      const id = normalizeParticipantUserId(p.userId);
-      if (id && !requiredIds.includes(id)) requiredIds.push(id);
-    });
+      const votesMapFresh = await loadVotes();
+      const participantsListFresh = await loadParticipants();
 
-    const participantRowsForLog = participantsListFresh.map((p) => {
-      const uid = normalizeParticipantUserId(p.userId);
-      return {
-        key: p.key,
-        label: p.label,
-        userId: uid,
-        vote: uid ? votesMapFresh[uid] ?? null : '(no linked account)',
-      };
-    });
-    const approveCount = requiredIds.filter(
-      (id) => votesMapFresh[id] === 'approve',
-    ).length;
+      const requiredIds = [];
+      participantsListFresh.forEach((p) => {
+        const id = normalizeParticipantUserId(p.userId);
+        if (id && !requiredIds.includes(id)) requiredIds.push(id);
+      });
 
-    const allApprovedFlag = allLinkedParticipantsApproved(
-      participantsListFresh,
-      votesMapFresh,
-    );
+      const participantRowsForLog = participantsListFresh.map((p) => {
+        const uid = normalizeParticipantUserId(p.userId);
+        return {
+          key: p.key,
+          label: p.label,
+          userId: uid,
+          vote: uid ? votesMapFresh[uid] ?? null : '(no linked account)',
+        };
+      });
+      const approveCount = requiredIds.filter(
+        (id) => votesMapFresh[id] === 'approve',
+      ).length;
 
-    // eslint-disable-next-line no-console
-    console.log('[ConflictPanel] Approve tally after vote', {
+      const allApprovedFlag = allLinkedParticipantsApproved(
+        participantsListFresh,
+        votesMapFresh,
+      );
+
+      // eslint-disable-next-line no-console
+      console.log('[ConflictPanel][SYNC] unanimous check:tally', {
+        source,
+        projectId,
+        sprintNumber,
+        requiredMemberCount: requiredIds.length,
+        approveCount,
+        allApproved: allApprovedFlag,
+        participants: participantRowsForLog,
+      });
+
+      if (!allApprovedFlag) {
+        // eslint-disable-next-line no-console
+        console.log('[ConflictPanel][SYNC] unanimous check:wait others');
+        return;
+      }
+
+      if (unanimousNavLockRef.current) {
+        // eslint-disable-next-line no-console
+        console.log('[ConflictPanel][SYNC] unanimous check:blocked (nav lock)');
+        return;
+      }
+      const navToken = `${projectId}:${sprintNumber}`;
+      if (conflictUnanimousNavToken === navToken) {
+        // eslint-disable-next-line no-console
+        console.log('[ConflictPanel][SYNC] unanimous check:blocked (global nav token)');
+        return;
+      }
+      unanimousNavLockRef.current = true;
+      conflictUnanimousNavToken = navToken;
+      // eslint-disable-next-line no-console
+      console.log('[ConflictPanel][SYNC] unanimous check:INVOKING onApprove → consensus', {
+        source,
+      });
+      try {
+        await onApproveRef.current?.();
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn('[ConflictPanel][SYNC] onApprove threw', e);
+        unanimousNavLockRef.current = false;
+        conflictUnanimousNavToken = null;
+      }
+    },
+    [
+      authUid,
+      sprintVoteKeyOk,
       projectId,
       sprintNumber,
-      requiredMemberCount: requiredIds.length,
-      approveCount,
-      allApproved: allApprovedFlag,
-      participants: participantRowsForLog,
-    });
-
-    if (!allApprovedFlag) return;
-    if (unanimousNavLockRef.current) return;
-    const navToken = `${projectId}:${sprintNumber}`;
-    if (conflictUnanimousNavToken === navToken) return;
-    unanimousNavLockRef.current = true;
-    conflictUnanimousNavToken = navToken;
-    try {
-      await onApprove?.();
-    } catch {
-      unanimousNavLockRef.current = false;
-      conflictUnanimousNavToken = null;
-    }
-  }
+      loadVotes,
+      loadParticipants,
+    ],
+  );
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
@@ -2186,46 +2236,68 @@ function ConflictPanel({
   }, [loadParticipants]);
 
   useEffect(() => {
-    if (!projectId) return undefined;
+    const sn = resolveSprintVotesSprintNumber(sprintNumber);
+    if (!projectId || sn == null) {
+      voteSyncChannelRef.current = null;
+      return undefined;
+    }
 
-    const filterSql = `project_id=eq.${projectId}`;
-    let channelReady = false;
+    const filterProject = `project_id=eq.${projectId}`;
+    const channelTopic = `vote-sync:${projectId}`;
+    let subscribedOk = false;
 
-    const invalidateVotes = async (why, payload) => {
-      const row = payload?.new || payload?.old;
+    const handlePostgresVote = async (eventName, payload) => {
+      const row = payload?.new ?? payload?.old ?? null;
+      const rowSn = resolveSprintVotesSprintNumber(row?.sprint_number);
       // eslint-disable-next-line no-console
-      console.log('[ConflictPanel] realtime → loadVotes()', {
-        why,
-        projectIdFilter: filterSql,
-        payloadEventType: payload?.eventType ?? payload?.event ?? null,
-        rowSnapshot: row
-          ? {
-              user_id: row.user_id,
-              sprint_number: row.sprint_number,
-              vote: row.vote,
-              project_id: row.project_id,
-            }
+      console.log('[ConflictPanel][RT][pg] postgres_changes', {
+        step: 'event',
+        eventName,
+        eventTypeField: payload?.eventType ?? null,
+        rowSn,
+        scopedSprint: sn,
+        matchesSprint: rowSn === sn,
+        rowBrief: row
+          ? { user_id: row.user_id, vote: row.vote, sprint_number: row.sprint_number }
           : null,
       });
-      try {
-        await loadVotes();
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.warn('[ConflictPanel] loadVotes after realtime failed', err);
-      }
+      if (rowSn == null || rowSn !== sn) return;
+      await runUnanimousConsensusCheck(`postgres_changes:${eventName}`);
     };
 
-    const channel = supabase
-      .channel(`sprint-votes-${projectId}`)
+    const handleBroadcastRefresh = async (msg) => {
+      const inner = msg?.payload ?? msg ?? {};
+      const pId = inner?.projectId;
+      const spr = resolveSprintVotesSprintNumber(inner?.sprintNumber);
+      // eslint-disable-next-line no-console
+      console.log('[ConflictPanel][RT][bc] broadcast sprint_votes_refresh', {
+        step: 'recv',
+        msg,
+        inner,
+      });
+      if (String(pId) !== String(projectId) || spr !== sn) {
+        // eslint-disable-next-line no-console
+        console.log('[ConflictPanel][RT][bc] ignored (wrong project/sprint)', { pId, spr });
+        return;
+      }
+      await runUnanimousConsensusCheck('broadcast:sprint_votes_refresh');
+    };
+
+    const ch = supabase
+      .channel(channelTopic, {
+        config: { broadcast: { self: false } },
+      })
       .on(
         'postgres_changes',
         {
           event: 'INSERT',
           schema: 'public',
           table: 'sprint_votes',
-          filter: filterSql,
+          filter: filterProject,
         },
-        (payload) => invalidateVotes('INSERT', payload),
+        (payload) => {
+          void handlePostgresVote('INSERT', payload);
+        },
       )
       .on(
         'postgres_changes',
@@ -2233,56 +2305,59 @@ function ConflictPanel({
           event: 'UPDATE',
           schema: 'public',
           table: 'sprint_votes',
-          filter: filterSql,
+          filter: filterProject,
         },
-        (payload) => invalidateVotes('UPDATE', payload),
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'DELETE',
-          schema: 'public',
-          table: 'sprint_votes',
-          filter: filterSql,
+        (payload) => {
+          void handlePostgresVote('UPDATE', payload);
         },
-        (payload) => invalidateVotes('DELETE', payload),
       )
+      .on('broadcast', { event: 'sprint_votes_refresh' }, (msg) => {
+        void handleBroadcastRefresh(msg);
+      })
       .on(
         'postgres_changes',
         {
           event: '*',
           schema: 'public',
           table: 'project_members',
-          filter: filterSql,
+          filter: filterProject,
         },
-        () => loadParticipants(),
+        () => {
+          // eslint-disable-next-line no-console
+          console.log('[ConflictPanel][RT][pg] project_members:* → loadParticipants()');
+          void loadParticipants();
+        },
       )
       .subscribe((status, err) => {
-        channelReady = status === 'SUBSCRIBED';
+        subscribedOk = status === 'SUBSCRIBED';
+        if (subscribedOk) {
+          voteSyncChannelRef.current = ch;
+        } else if (
+          status === 'CHANNEL_ERROR'
+          || status === 'TIMED_OUT'
+          || status === 'CLOSED'
+        ) {
+          voteSyncChannelRef.current = null;
+        }
         // eslint-disable-next-line no-console
-        console.log('[ConflictPanel] sprint_votes realtime channel', {
+        console.log('[ConflictPanel][RT] subscribe', {
+          channelTopic,
+          scopedSprint: sn,
+          filterProject,
           status,
-          channel: `sprint-votes-${projectId}`,
-          filter: filterSql,
-          errorMessage:
-            typeof err?.message === 'string'
-              ? err.message
-              : err != null
-                ? String(err)
-                : null,
-          subscribedOk: channelReady,
+          subscribedOk,
+          subscribeErr:
+            typeof err?.message === 'string' ? err.message : err != null ? String(err) : null,
         });
       });
 
     return () => {
       // eslint-disable-next-line no-console
-      console.log('[ConflictPanel] sprint_votes realtime channel remove', {
-        projectId,
-        wasSubscribed: channelReady,
-      });
-      supabase.removeChannel(channel);
+      console.log('[ConflictPanel][RT] unsubscribe', { channelTopic, hadSubscribed: subscribedOk });
+      voteSyncChannelRef.current = null;
+      void supabase.removeChannel(ch);
     };
-  }, [projectId, loadVotes, loadParticipants]);
+  }, [projectId, sprintNumber, loadParticipants, loadVotes, runUnanimousConsensusCheck]);
 
   async function castVote(kind) {
     const sn = resolveSprintVotesSprintNumber(sprintNumber);
@@ -2332,6 +2407,54 @@ function ConflictPanel({
         return false;
       }
       const map = await loadVotes();
+      const broadcastPayload = { projectId, sprintNumber: sn };
+      // eslint-disable-next-line no-console
+      console.log('[ConflictPanel][SYNC] flush broadcast (retry until channel SUBSCRIBED)', broadcastPayload);
+
+      let broadcastSent = false;
+      let lastBroadcastErr = null;
+
+      for (let attempt = 0; attempt < 40; attempt += 1) {
+        const ch = voteSyncChannelRef.current;
+        if (ch) {
+          // eslint-disable-next-line no-await-in-loop
+          const { error: bErr } = await ch.send({
+            type: 'broadcast',
+            event: 'sprint_votes_refresh',
+            payload: broadcastPayload,
+          });
+          lastBroadcastErr = bErr?.message ?? null;
+          if (!bErr) {
+            broadcastSent = true;
+            // eslint-disable-next-line no-console
+            console.log('[ConflictPanel][SYNC] broadcast send sprint_votes_refresh OK', {
+              attempt,
+              ...broadcastPayload,
+            });
+            break;
+          }
+          // eslint-disable-next-line no-console
+          console.warn('[ConflictPanel][SYNC] broadcast send error (retrying)', {
+            attempt,
+            broadcastError: lastBroadcastErr,
+            ...broadcastPayload,
+          });
+        } else if (attempt === 0) {
+          // eslint-disable-next-line no-console
+          console.log('[ConflictPanel][SYNC] vote channel not ready yet, waiting…', broadcastPayload);
+        }
+        // eslint-disable-next-line no-await-in-loop, no-promise-executor-return
+        await new Promise((r) => window.setTimeout(r, 75));
+      }
+
+      if (!broadcastSent) {
+        // eslint-disable-next-line no-console
+        console.warn('[ConflictPanel][SYNC] broadcast NOT delivered after retries', {
+          ...broadcastPayload,
+          lastBroadcastErr,
+          hadChannelRef: Boolean(voteSyncChannelRef.current),
+        });
+      }
       return map;
     } finally {
       setVoteSaving(false);
@@ -2341,7 +2464,7 @@ function ConflictPanel({
   async function handleApproveVoteClick() {
     const map = await castVote('approve');
     if (map === false) return;
-    await finalizeConsensusIfUnanimousFromApproveClick();
+    await runUnanimousConsensusCheck('local-after-approve-click');
   }
 
   async function handleOpposeVoteClick() {
