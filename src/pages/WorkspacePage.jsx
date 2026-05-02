@@ -5,8 +5,29 @@ import Header from '@/components/Header';
 import Icon from '@/components/Icon';
 import { C } from '@/constants/colors';
 import { getProjectById, DEFAULT_PROJECT } from '@/constants/projects';
+import {
+  REALTIME_BROADCAST_EVENTS,
+  REALTIME_CHANNELS,
+  VOTE_STATUS,
+} from '@/constants/realtime';
 import { useLang } from '@/i18n/LangContext';
 import { supabase } from '@/lib/supabase';
+import {
+  getUserColor,
+  isEditableKeyboardTarget,
+  mapDesignFileRow,
+  normalizeParticipantUserId,
+  participantVoteDisplayName,
+  pickLinkedMemberUid,
+  resolveSprintVotesSprintNumber,
+} from '@/utils/helpers';
+import {
+  createMarkersRealtimeChannel,
+  createVoteSyncRealtimeChannel,
+  createWorkspaceProjectMetaChannel,
+  eqColumnFilter,
+  fetchProfileFullNamesMap,
+} from '@/utils/supabaseHelpers';
 
 /** Prevents duplicate onApprove under React StrictMode / double effects (module-scoped). */
 let conflictUnanimousNavToken = null;
@@ -21,61 +42,6 @@ const MARKER_MODE_CURSOR =
 
 const ZOOM_MIN = 0.2;
 const ZOOM_MAX = 5;
-const USER_COLOR_PALETTE = [
-  '#10B981',
-  '#3A6EA5',
-  '#8B5CF6',
-  '#F59E0B',
-  '#EF4444',
-  '#14B8A6',
-  '#EC4899',
-  '#6366F1',
-  '#22C55E',
-  '#0EA5E9',
-];
-
-function getUserColor(email) {
-  const normalized = String(email || '').trim().toLowerCase();
-  if (!normalized) return '#64748B';
-  let hash = 0;
-  for (let i = 0; i < normalized.length; i += 1) {
-    hash = ((hash << 5) - hash) + normalized.charCodeAt(i);
-    hash |= 0;
-  }
-  const idx = Math.abs(hash) % USER_COLOR_PALETTE.length;
-  return USER_COLOR_PALETTE[idx];
-}
-
-function isEditableKeyboardTarget(target) {
-  if (!target || typeof target !== 'object') return false;
-  const t = target.tagName;
-  if (t === 'INPUT' || t === 'TEXTAREA' || t === 'SELECT') return true;
-  if (target.isContentEditable) return true;
-  return false;
-}
-
-function extractStoragePathFromPublicUrl(url) {
-  if (!url) return '';
-  try {
-    const u = new URL(url);
-    const marker = '/object/public/design-bucket/';
-    const idx = u.pathname.indexOf(marker);
-    if (idx < 0) return '';
-    const encodedPath = u.pathname.slice(idx + marker.length);
-    return decodeURIComponent(encodedPath);
-  } catch {
-    return '';
-  }
-}
-
-function mapDesignFileRow(row) {
-  const imageUrl = row?.file_url || row?.url || '';
-  return {
-    id: row?.id || null,
-    url: imageUrl,
-    storagePath: extractStoragePathFromPublicUrl(imageUrl),
-  };
-}
 
 // ─── Blueprint viewer ────────────────────────────────────────
 function DesignMarker({
@@ -522,42 +488,40 @@ function BlueprintViewer({
     loadMarkers();
 
     if (!projectId) return () => { alive = false; };
-    const channel = supabase
-      .channel(`markers-realtime-${projectId}`)
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'markers', filter: `project_id=eq.${projectId}` },
-        (payload) => {
+    /**
+     * Realtime: `public.markers` for this project — INSERT (filtered by project_id),
+     * DELETE (full-table; filter client-side by removed row id), UPDATE (filtered).
+     * Keeps on-canvas pins in sync when collaborators add/remove/edit notes.
+     */
+    const channel = createMarkersRealtimeChannel(supabase, projectId, {
+      onInsert: (payload) => {
+        if (import.meta.env.DEV) {
           console.log('[markers realtime] INSERT payload', payload);
-          const payloadSprint = Number(payload?.new?.sprint_number);
-          if (payloadSprint !== Number(viewingSprint)) return;
-          const next = normalizeMarkerRow(payload.new);
-          if (!next) return;
-          setDesignMarkers((prev) => (prev.some((m) => String(m.id) === String(next.id)) ? prev : [...prev, next]));
-        },
-      )
-      .on(
-        'postgres_changes',
-        { event: 'DELETE', schema: 'public', table: 'markers' },
-        (payload) => {
+        }
+        const payloadSprint = Number(payload?.new?.sprint_number);
+        if (payloadSprint !== Number(viewingSprint)) return;
+        const next = normalizeMarkerRow(payload.new);
+        if (!next) return;
+        setDesignMarkers((prev) => (prev.some((m) => String(m.id) === String(next.id)) ? prev : [...prev, next]));
+      },
+      onDelete: (payload) => {
+        if (import.meta.env.DEV) {
           console.log('[markers realtime] DELETE payload', payload, {
             oldRow: payload?.old,
             removedId: payload?.old?.id,
             projectId,
           });
-          const removedId = payload?.old?.id;
-          if (!removedId) {
-            console.warn('[markers realtime] DELETE received without id in payload.old. ' +
-              'Set REPLICA IDENTITY FULL on public.markers to receive full old row.');
-            return;
-          }
-          setDesignMarkers((prev) => prev.filter((m) => String(m.id) !== String(removedId)));
-        },
-      )
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'markers', filter: `project_id=eq.${projectId}` },
-        (payload) => {
+        }
+        const removedId = payload?.old?.id;
+        if (!removedId) {
+          console.warn('[markers realtime] DELETE received without id in payload.old. ' +
+            'Set REPLICA IDENTITY FULL on public.markers to receive full old row.');
+          return;
+        }
+        setDesignMarkers((prev) => prev.filter((m) => String(m.id) !== String(removedId)));
+      },
+      onUpdate: (payload) => {
+        if (import.meta.env.DEV) {
           console.log('[markers realtime] UPDATE payload', payload, {
             newRow: payload?.new,
             oldRow: payload?.old,
@@ -565,34 +529,38 @@ function BlueprintViewer({
             id: payload?.new?.id,
             projectId,
           });
-          const payloadSprint = Number(payload?.new?.sprint_number);
-          if (payloadSprint !== Number(viewingSprint)) return;
-          const next = normalizeMarkerRow(payload.new);
-          if (!next) {
-            console.warn('[markers realtime] UPDATE received without normalizable payload.new', payload);
-            return;
-          }
-          setDesignMarkers((prev) => {
-            const exists = prev.some((m) => String(m.id) === String(next.id));
-            if (!exists) {
+        }
+        const payloadSprint = Number(payload?.new?.sprint_number);
+        if (payloadSprint !== Number(viewingSprint)) return;
+        const next = normalizeMarkerRow(payload.new);
+        if (!next) {
+          console.warn('[markers realtime] UPDATE received without normalizable payload.new', payload);
+          return;
+        }
+        setDesignMarkers((prev) => {
+          const exists = prev.some((m) => String(m.id) === String(next.id));
+          if (!exists) {
+            if (import.meta.env.DEV) {
               console.log('[markers realtime] UPDATE for unknown marker; appending', next);
-              return [...prev, next];
             }
-            return prev.map((m) =>
-              String(m.id) === String(next.id)
-                ? {
-                    ...m,
-                    ...next,
-                    note: next.note,
-                  }
-                : m,
-            );
-          });
-        },
-      )
-      .subscribe((status) => {
+            return [...prev, next];
+          }
+          return prev.map((m) =>
+            String(m.id) === String(next.id)
+              ? {
+                  ...m,
+                  ...next,
+                  note: next.note,
+                }
+              : m,
+          );
+        });
+      },
+    }).subscribe((status) => {
+      if (import.meta.env.DEV) {
         console.log('[markers realtime] channel status', status, { projectId });
-      });
+      }
+    });
 
     return () => {
       alive = false;
@@ -736,7 +704,9 @@ function BlueprintViewer({
         'values ($1, $2, $3, $4, $5, $6) returning *; ' +
         `-- payload=${JSON.stringify(insertPayload)}`,
     };
-    console.log('[BlueprintViewer] Inserting marker (request)', queryDescription);
+    if (import.meta.env.DEV) {
+      console.log('[BlueprintViewer] Inserting marker (request)', queryDescription);
+    }
 
     const { data, error, status, statusText } = await supabase
       .from('markers')
@@ -744,13 +714,15 @@ function BlueprintViewer({
       .select('id, project_id, sprint_number, x_pct, y_pct, note, created_by, created_at')
       .single();
 
-    console.log('[BlueprintViewer] Inserting marker (response)', {
-      query: queryDescription,
-      data,
-      error,
-      status,
-      statusText,
-    });
+    if (import.meta.env.DEV) {
+      console.log('[BlueprintViewer] Inserting marker (response)', {
+        query: queryDescription,
+        data,
+        error,
+        status,
+        statusText,
+      });
+    }
 
     if (error) {
       console.error('[BlueprintViewer] Failed to insert marker', {
@@ -1441,29 +1413,35 @@ function ChatPanel({ projectId, senderRole = 'engineer', width = 220 }) {
     if (error) {
       // Keep going for duplicate pending rows so invite email can still be sent.
       if (isAlreadyInvited) {
-        console.log('[handleInvite] Existing invite row found; proceeding to Edge Function call.', {
-          projectId,
-          email: normalized,
-        });
+        if (import.meta.env.DEV) {
+          console.log('[handleInvite] Existing invite row found; proceeding to Edge Function call.', {
+            projectId,
+            email: normalized,
+          });
+        }
       } else {
       setInviteState({ status: 'error', message: error.message || t('inviteFailed') });
       return false;
       }
     }
 
-    console.log('[handleInvite] Invoking Edge Function invite-project-member', {
-      projectId,
-      email: normalized,
-    });
+    if (import.meta.env.DEV) {
+      console.log('[handleInvite] Invoking Edge Function invite-project-member', {
+        projectId,
+        email: normalized,
+      });
+    }
     const { error: invokeError } = await supabase.functions.invoke('invite-project-member', {
       body: { email: normalized, projectId },
     });
-    console.log('[handleInvite] Edge Function invite-project-member result', {
-      ok: !invokeError,
-      error: invokeError?.message || null,
-      projectId,
-      email: normalized,
-    });
+    if (import.meta.env.DEV) {
+      console.log('[handleInvite] Edge Function invite-project-member result', {
+        ok: !invokeError,
+        error: invokeError?.message || null,
+        projectId,
+        email: normalized,
+      });
+    }
     if (invokeError) {
       if (!isAlreadyInvited) {
         await supabase
@@ -1825,68 +1803,6 @@ function RadarChart() {
   );
 }
 
-function pickLinkedMemberUid(row) {
-  if (!row || typeof row !== 'object') return null;
-  return (
-    row.user_id ||
-    row.member_user_id ||
-    row.member_id ||
-    row.accepted_user_id ||
-    row.invited_user_id ||
-    null
-  );
-}
-
-function emailLocalPart(email) {
-  const e = String(email || '').trim();
-  const at = e.indexOf('@');
-  return at > 0 ? e.slice(0, at) : e;
-}
-
-/** Single map-key form for participant user ids (avoids casing mismatch between sprint_votes, props, profiles). */
-function normalizeParticipantUserId(id) {
-  if (id == null || id === '') return null;
-  const s = String(id).trim().toLowerCase();
-  return s.length ? s : null;
-}
-
-/**
- * Member list label: prefer signup full_name (auth user_metadata for the current user;
- * for others, public.profiles.full_name when the project mirrors auth — common Supabase pattern).
- * Otherwise email local-part before @.
- */
-function participantVoteDisplayName({
-  userId,
-  email,
-  authSelfId,
-  authSelfFullName,
-  profileFullNameById,
-}) {
-  const uidNorm = normalizeParticipantUserId(userId);
-  const local = emailLocalPart(email);
-  if (!uidNorm) {
-    return local || String(email || '').trim() || '—';
-  }
-  const selfNorm = normalizeParticipantUserId(authSelfId);
-  const isSelf = selfNorm !== null && uidNorm === selfNorm;
-  const selfNm = String(authSelfFullName || '').trim();
-  const prof = String(profileFullNameById[uidNorm] || '').trim();
-  if (isSelf && selfNm) return selfNm;
-  if (prof) return prof;
-  if (local) return local;
-  return `${uidNorm.slice(0, 8)}…`;
-}
-
-/** Sprint index for sprint_votes (avoids JS Number(null)==0 querying the wrong sprint). */
-function resolveSprintVotesSprintNumber(sprintNumberRaw) {
-  if (sprintNumberRaw === null || sprintNumberRaw === undefined || sprintNumberRaw === '') {
-    return null;
-  }
-  const n = Math.trunc(Number(sprintNumberRaw));
-  if (!Number.isFinite(n) || n < 1) return null;
-  return n;
-}
-
 // ─── Conflict panel ──────────────────────────────────────────
 function ConflictPanel({
   width,
@@ -1937,15 +1853,16 @@ function ConflictPanel({
       .eq('sprint_number', sn);
     const { data, error } = await voteQuery;
 
-    // eslint-disable-next-line no-console
-    console.log('[ConflictPanel] sprint_votes fetch', {
-      projectId,
-      sprintNumberFiltered: sn,
-      sprintNumberPropRaw: sprintNumber,
-      rowCount: data?.length ?? 0,
-      rows: data,
-      fetchError: error?.message ?? null,
-    });
+    if (import.meta.env.DEV) {
+      console.log('[ConflictPanel] sprint_votes fetch', {
+        projectId,
+        sprintNumberFiltered: sn,
+        sprintNumberPropRaw: sprintNumber,
+        rowCount: data?.length ?? 0,
+        rows: data,
+        fetchError: error?.message ?? null,
+      });
+    }
 
     const next = {};
     (data || []).forEach((r) => {
@@ -2038,24 +1955,11 @@ function ConflictPanel({
       ]),
     ].filter(Boolean);
 
-    const profileFullNameById = {};
-    let profileRowsRaw = null;
-    let profileFetchErr = null;
-    if (profileIds.length > 0) {
-      const profileRes = await supabase
-        .from('profiles')
-        .select('id, full_name')
-        .in('id', profileIds);
-      profileRowsRaw = profileRes.data ?? null;
-      profileFetchErr = profileRes.error ?? null;
-      (profileRowsRaw || []).forEach((r) => {
-        const id = normalizeParticipantUserId(r?.id);
-        if (!id) return;
-        if (r.full_name != null && String(r.full_name).trim() !== '') {
-          profileFullNameById[id] = String(r.full_name).trim();
-        }
-      });
-    }
+    const {
+      profileFullNameById,
+      profileRowsRaw,
+      profileFetchErr,
+    } = await fetchProfileFullNamesMap(supabase, profileIds);
 
     const returnedIds = new Set(
       (profileRowsRaw || [])
@@ -2064,18 +1968,19 @@ function ConflictPanel({
     );
     const missingUserIdsNoProfileRow = profileIds.filter((pid) => !returnedIds.has(pid));
 
-    // eslint-disable-next-line no-console
-    console.log('[ConflictPanel] profiles lookup', {
-      requestedProfileIds: [...profileIds],
-      profileRowCount: profileRowsRaw?.length ?? 0,
-      profileRowsRaw,
-      mappedFullNamesById: { ...profileFullNameById },
-      missingUserIdsNoProfileRow,
-      projectId,
-      resolvedOwnerId,
-      profilesQuerySkipped: profileIds.length === 0,
-      profileQueryError: profileFetchErr?.message ?? null,
-    });
+    if (import.meta.env.DEV) {
+      console.log('[ConflictPanel] profiles lookup', {
+        requestedProfileIds: [...profileIds],
+        profileRowCount: profileRowsRaw?.length ?? 0,
+        profileRowsRaw,
+        mappedFullNamesById: { ...profileFullNameById },
+        missingUserIdsNoProfileRow,
+        projectId,
+        resolvedOwnerId,
+        profilesQuerySkipped: profileIds.length === 0,
+        profileQueryError: profileFetchErr?.message ?? null,
+      });
+    }
 
     const list = tentative.map((t) => ({
       key: t.key,
@@ -2094,7 +1999,7 @@ function ConflictPanel({
     return list;
   }, [projectId, ownerUserId]);
 
-  /** Every project participant with a linked account must have vote === 'approve' in sprint_votes. Pending invites without user_id cannot vote yet and do not satisfy or block quorum. Never pass when nobody has a uid. */
+  /** Every linked participant must have vote === VOTE_STATUS.APPROVE in sprint_votes. Pending invites without user_id cannot vote yet and do not satisfy or block quorum. Never pass when nobody has a uid. */
   function allLinkedParticipantsApproved(participantsList, votesMap) {
     const ids = [];
     participantsList.forEach((p) => {
@@ -2102,22 +2007,24 @@ function ConflictPanel({
       if (id && !ids.includes(id)) ids.push(id);
     });
     if (ids.length === 0) return false;
-    return ids.every((userId) => votesMap[userId] === 'approve');
+    return ids.every((userId) => votesMap[userId] === VOTE_STATUS.APPROVE);
   }
 
   const runUnanimousConsensusCheck = useCallback(
     async (source) => {
-      // eslint-disable-next-line no-console
-      console.log('[ConflictPanel][SYNC] unanimous check:start', {
-        source,
-        projectId,
-        sprintNumber,
-        authUidPresent: !!authUid,
-        sprintVoteKeyOk,
-      });
+      if (import.meta.env.DEV) {
+        console.log('[ConflictPanel][SYNC] unanimous check:start', {
+          source,
+          projectId,
+          sprintNumber,
+          authUidPresent: !!authUid,
+          sprintVoteKeyOk,
+        });
+      }
       if (!authUid || !sprintVoteKeyOk) {
-        // eslint-disable-next-line no-console
-        console.log('[ConflictPanel][SYNC] unanimous check:skip (auth or sprint key)');
+        if (import.meta.env.DEV) {
+          console.log('[ConflictPanel][SYNC] unanimous check:skip (auth or sprint key)');
+        }
         return;
       }
 
@@ -2140,7 +2047,7 @@ function ConflictPanel({
         };
       });
       const approveCount = requiredIds.filter(
-        (id) => votesMapFresh[id] === 'approve',
+        (id) => votesMapFresh[id] === VOTE_STATUS.APPROVE,
       ).length;
 
       const allApprovedFlag = allLinkedParticipantsApproved(
@@ -2148,40 +2055,45 @@ function ConflictPanel({
         votesMapFresh,
       );
 
-      // eslint-disable-next-line no-console
-      console.log('[ConflictPanel][SYNC] unanimous check:tally', {
-        source,
-        projectId,
-        sprintNumber,
-        requiredMemberCount: requiredIds.length,
-        approveCount,
-        allApproved: allApprovedFlag,
-        participants: participantRowsForLog,
-      });
+      if (import.meta.env.DEV) {
+        console.log('[ConflictPanel][SYNC] unanimous check:tally', {
+          source,
+          projectId,
+          sprintNumber,
+          requiredMemberCount: requiredIds.length,
+          approveCount,
+          allApproved: allApprovedFlag,
+          participants: participantRowsForLog,
+        });
+      }
 
       if (!allApprovedFlag) {
-        // eslint-disable-next-line no-console
-        console.log('[ConflictPanel][SYNC] unanimous check:wait others');
+        if (import.meta.env.DEV) {
+          console.log('[ConflictPanel][SYNC] unanimous check:wait others');
+        }
         return;
       }
 
       if (unanimousNavLockRef.current) {
-        // eslint-disable-next-line no-console
-        console.log('[ConflictPanel][SYNC] unanimous check:blocked (nav lock)');
+        if (import.meta.env.DEV) {
+          console.log('[ConflictPanel][SYNC] unanimous check:blocked (nav lock)');
+        }
         return;
       }
       const navToken = `${projectId}:${sprintNumber}`;
       if (conflictUnanimousNavToken === navToken) {
-        // eslint-disable-next-line no-console
-        console.log('[ConflictPanel][SYNC] unanimous check:blocked (global nav token)');
+        if (import.meta.env.DEV) {
+          console.log('[ConflictPanel][SYNC] unanimous check:blocked (global nav token)');
+        }
         return;
       }
       unanimousNavLockRef.current = true;
       conflictUnanimousNavToken = navToken;
-      // eslint-disable-next-line no-console
-      console.log('[ConflictPanel][SYNC] unanimous check:INVOKING onApprove → consensus', {
-        source,
-      });
+      if (import.meta.env.DEV) {
+        console.log('[ConflictPanel][SYNC] unanimous check:INVOKING onApprove → consensus', {
+          source,
+        });
+      }
       try {
         await onApproveRef.current?.();
       } catch (e) {
@@ -2235,6 +2147,12 @@ function ConflictPanel({
     loadParticipants();
   }, [loadParticipants]);
 
+  /**
+   * Vote sync Realtime on one channel per project:
+   * - postgres_changes INSERT/UPDATE on `sprint_votes` → re-check unanimous consensus for this sprint.
+   * - broadcast REALTIME_BROADCAST_EVENTS.SPRINT_VOTES_REFRESH → peer notify when Postgres events don’t arrive (RLS/client gaps).
+   * - postgres_changes * on `project_members` → refresh participant list (invites / linked accounts).
+   */
   useEffect(() => {
     const sn = resolveSprintVotesSprintNumber(sprintNumber);
     if (!projectId || sn == null) {
@@ -2242,25 +2160,26 @@ function ConflictPanel({
       return undefined;
     }
 
-    const filterProject = `project_id=eq.${projectId}`;
-    const channelTopic = `vote-sync:${projectId}`;
+    const filterProject = eqColumnFilter('project_id', projectId);
+    const channelTopic = REALTIME_CHANNELS.VOTE_SYNC(projectId);
     let subscribedOk = false;
 
     const handlePostgresVote = async (eventName, payload) => {
       const row = payload?.new ?? payload?.old ?? null;
       const rowSn = resolveSprintVotesSprintNumber(row?.sprint_number);
-      // eslint-disable-next-line no-console
-      console.log('[ConflictPanel][RT][pg] postgres_changes', {
-        step: 'event',
-        eventName,
-        eventTypeField: payload?.eventType ?? null,
-        rowSn,
-        scopedSprint: sn,
-        matchesSprint: rowSn === sn,
-        rowBrief: row
-          ? { user_id: row.user_id, vote: row.vote, sprint_number: row.sprint_number }
-          : null,
-      });
+      if (import.meta.env.DEV) {
+        console.log('[ConflictPanel][RT][pg] postgres_changes', {
+          step: 'event',
+          eventName,
+          eventTypeField: payload?.eventType ?? null,
+          rowSn,
+          scopedSprint: sn,
+          matchesSprint: rowSn === sn,
+          rowBrief: row
+            ? { user_id: row.user_id, vote: row.vote, sprint_number: row.sprint_number }
+            : null,
+        });
+      }
       if (rowSn == null || rowSn !== sn) return;
       await runUnanimousConsensusCheck(`postgres_changes:${eventName}`);
     };
@@ -2269,77 +2188,58 @@ function ConflictPanel({
       const inner = msg?.payload ?? msg ?? {};
       const pId = inner?.projectId;
       const spr = resolveSprintVotesSprintNumber(inner?.sprintNumber);
-      // eslint-disable-next-line no-console
-      console.log('[ConflictPanel][RT][bc] broadcast sprint_votes_refresh', {
-        step: 'recv',
-        msg,
-        inner,
-      });
+      if (import.meta.env.DEV) {
+        console.log(
+          `[ConflictPanel][RT][bc] broadcast ${REALTIME_BROADCAST_EVENTS.SPRINT_VOTES_REFRESH}`,
+          {
+            step: 'recv',
+            msg,
+            inner,
+          },
+        );
+      }
       if (String(pId) !== String(projectId) || spr !== sn) {
-        // eslint-disable-next-line no-console
-        console.log('[ConflictPanel][RT][bc] ignored (wrong project/sprint)', { pId, spr });
+        if (import.meta.env.DEV) {
+          console.log('[ConflictPanel][RT][bc] ignored (wrong project/sprint)', { pId, spr });
+        }
         return;
       }
-      await runUnanimousConsensusCheck('broadcast:sprint_votes_refresh');
+      await runUnanimousConsensusCheck(
+        `broadcast:${REALTIME_BROADCAST_EVENTS.SPRINT_VOTES_REFRESH}`,
+      );
     };
 
-    const ch = supabase
-      .channel(channelTopic, {
-        config: { broadcast: { self: false } },
-      })
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'sprint_votes',
-          filter: filterProject,
-        },
-        (payload) => {
-          void handlePostgresVote('INSERT', payload);
-        },
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'sprint_votes',
-          filter: filterProject,
-        },
-        (payload) => {
-          void handlePostgresVote('UPDATE', payload);
-        },
-      )
-      .on('broadcast', { event: 'sprint_votes_refresh' }, (msg) => {
+    const ch = createVoteSyncRealtimeChannel(supabase, {
+      channelTopic,
+      filterProject,
+      onSprintVoteInsert: (payload) => {
+        void handlePostgresVote('INSERT', payload);
+      },
+      onSprintVoteUpdate: (payload) => {
+        void handlePostgresVote('UPDATE', payload);
+      },
+      onBroadcast: (msg) => {
         void handleBroadcastRefresh(msg);
-      })
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'project_members',
-          filter: filterProject,
-        },
-        () => {
-          // eslint-disable-next-line no-console
+      },
+      onProjectMembersChange: () => {
+        if (import.meta.env.DEV) {
           console.log('[ConflictPanel][RT][pg] project_members:* → loadParticipants()');
-          void loadParticipants();
-        },
-      )
-      .subscribe((status, err) => {
-        subscribedOk = status === 'SUBSCRIBED';
-        if (subscribedOk) {
-          voteSyncChannelRef.current = ch;
-        } else if (
-          status === 'CHANNEL_ERROR'
-          || status === 'TIMED_OUT'
-          || status === 'CLOSED'
-        ) {
-          voteSyncChannelRef.current = null;
         }
-        // eslint-disable-next-line no-console
+        void loadParticipants();
+      },
+    });
+    ch.subscribe((status, err) => {
+      subscribedOk = status === 'SUBSCRIBED';
+      if (subscribedOk) {
+        voteSyncChannelRef.current = ch;
+      } else if (
+        status === 'CHANNEL_ERROR'
+        || status === 'TIMED_OUT'
+        || status === 'CLOSED'
+      ) {
+        voteSyncChannelRef.current = null;
+      }
+      if (import.meta.env.DEV) {
         console.log('[ConflictPanel][RT] subscribe', {
           channelTopic,
           scopedSprint: sn,
@@ -2349,11 +2249,13 @@ function ConflictPanel({
           subscribeErr:
             typeof err?.message === 'string' ? err.message : err != null ? String(err) : null,
         });
-      });
+      }
+    });
 
     return () => {
-      // eslint-disable-next-line no-console
-      console.log('[ConflictPanel][RT] unsubscribe', { channelTopic, hadSubscribed: subscribedOk });
+      if (import.meta.env.DEV) {
+        console.log('[ConflictPanel][RT] unsubscribe', { channelTopic, hadSubscribed: subscribedOk });
+      }
       voteSyncChannelRef.current = null;
       void supabase.removeChannel(ch);
     };
@@ -2378,15 +2280,17 @@ function ConflictPanel({
       return false;
     }
 
-    const voteValue = kind === 'approve' ? 'approve' : 'oppose';
-    // eslint-disable-next-line no-console
-    console.log('[ConflictPanel] castVote submitting', {
-      voterUserId: uid,
-      vote: voteValue,
-      projectId,
-      sprintNumber: sn,
-      sessionEmail: sessionUser?.email ?? null,
-    });
+    const voteValue =
+      kind === VOTE_STATUS.APPROVE ? VOTE_STATUS.APPROVE : VOTE_STATUS.OPPOSE;
+    if (import.meta.env.DEV) {
+      console.log('[ConflictPanel] castVote submitting', {
+        voterUserId: uid,
+        vote: voteValue,
+        projectId,
+        sprintNumber: sn,
+        sessionEmail: sessionUser?.email ?? null,
+      });
+    }
 
     setVoteSaving(true);
     try {
@@ -2408,8 +2312,9 @@ function ConflictPanel({
       }
       const map = await loadVotes();
       const broadcastPayload = { projectId, sprintNumber: sn };
-      // eslint-disable-next-line no-console
-      console.log('[ConflictPanel][SYNC] flush broadcast (retry until channel SUBSCRIBED)', broadcastPayload);
+      if (import.meta.env.DEV) {
+        console.log('[ConflictPanel][SYNC] flush broadcast (retry until channel SUBSCRIBED)', broadcastPayload);
+      }
 
       let broadcastSent = false;
       let lastBroadcastErr = null;
@@ -2420,17 +2325,18 @@ function ConflictPanel({
           // eslint-disable-next-line no-await-in-loop
           const { error: bErr } = await ch.send({
             type: 'broadcast',
-            event: 'sprint_votes_refresh',
+            event: REALTIME_BROADCAST_EVENTS.SPRINT_VOTES_REFRESH,
             payload: broadcastPayload,
           });
           lastBroadcastErr = bErr?.message ?? null;
           if (!bErr) {
             broadcastSent = true;
-            // eslint-disable-next-line no-console
-            console.log('[ConflictPanel][SYNC] broadcast send sprint_votes_refresh OK', {
-              attempt,
-              ...broadcastPayload,
-            });
+            if (import.meta.env.DEV) {
+              console.log('[ConflictPanel][SYNC] broadcast send sprint_votes_refresh OK', {
+                attempt,
+                ...broadcastPayload,
+              });
+            }
             break;
           }
           // eslint-disable-next-line no-console
@@ -2440,8 +2346,9 @@ function ConflictPanel({
             ...broadcastPayload,
           });
         } else if (attempt === 0) {
-          // eslint-disable-next-line no-console
-          console.log('[ConflictPanel][SYNC] vote channel not ready yet, waiting…', broadcastPayload);
+          if (import.meta.env.DEV) {
+            console.log('[ConflictPanel][SYNC] vote channel not ready yet, waiting…', broadcastPayload);
+          }
         }
         // eslint-disable-next-line no-await-in-loop, no-promise-executor-return
         await new Promise((r) => window.setTimeout(r, 75));
@@ -2462,13 +2369,13 @@ function ConflictPanel({
   }
 
   async function handleApproveVoteClick() {
-    const map = await castVote('approve');
+    const map = await castVote(VOTE_STATUS.APPROVE);
     if (map === false) return;
     await runUnanimousConsensusCheck('local-after-approve-click');
   }
 
   async function handleOpposeVoteClick() {
-    await castVote('oppose');
+    await castVote(VOTE_STATUS.OPPOSE);
   }
 
   function handleRequestAiAnalysis() {
@@ -2498,7 +2405,7 @@ function ConflictPanel({
   const showVoteWaitingOthers =
     !!(
       authUid
-      && voteMap[authUid] === 'approve'
+      && voteMap[authUid] === VOTE_STATUS.APPROVE
       && !allLinkedParticipantsApproved(participants, voteMap)
     );
 
@@ -2823,8 +2730,8 @@ function ConflictPanel({
                     if (p.userId) {
                       const uidNorm = normalizeParticipantUserId(p.userId);
                       const v = uidNorm ? voteMap[uidNorm] : undefined;
-                      if (v === 'approve') status = 'approve';
-                      else if (v === 'oppose') status = 'oppose';
+                      if (v === VOTE_STATUS.APPROVE) status = VOTE_STATUS.APPROVE;
+                      else if (v === VOTE_STATUS.OPPOSE) status = VOTE_STATUS.OPPOSE;
                       else status = 'pending';
                     }
 
@@ -2854,9 +2761,9 @@ function ConflictPanel({
                           {p.label}
                         </span>
                         <span style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center' }}>
-                          {status === 'approve' ? (
+                          {status === VOTE_STATUS.APPROVE ? (
                             <Icon name="check" size={14} color={C.emerald} />
-                          ) : status === 'oppose' ? (
+                          ) : status === VOTE_STATUS.OPPOSE ? (
                             <Icon name="x" size={14} color={C.coral} />
                           ) : (
                             <span
@@ -3404,7 +3311,9 @@ export default function WorkspacePage() {
         .eq('id', projectId)
         .single();
 
-      console.log('[WorkspacePage] raw query result', data, error);
+      if (import.meta.env.DEV) {
+        console.log('[WorkspacePage] raw query result', data, error);
+      }
 
       if (!alive) return;
       if (error || !data) {
@@ -3437,14 +3346,15 @@ export default function WorkspacePage() {
 
   useEffect(() => {
     if (!projectId) return;
-    // eslint-disable-next-line no-console
-    console.log('[WorkspacePage] ConflictPanel sprintNumber wiring', {
-      projectMetaSprintRaw: projectMeta?.sprint_number ?? null,
-      fallbackProjectSprint: fallbackProject.sprint ?? null,
-      workspaceCanonicalSprint,
-      viewingSprintTimeline: viewingSprint,
-      sprintNumberPassedToConflictPanel: conflictPanelSprintNumber,
-    });
+    if (import.meta.env.DEV) {
+      console.log('[WorkspacePage] ConflictPanel sprintNumber wiring', {
+        projectMetaSprintRaw: projectMeta?.sprint_number ?? null,
+        fallbackProjectSprint: fallbackProject.sprint ?? null,
+        workspaceCanonicalSprint,
+        viewingSprintTimeline: viewingSprint,
+        sprintNumberPassedToConflictPanel: conflictPanelSprintNumber,
+      });
+    }
   }, [
     projectId,
     projectMeta?.sprint_number,
@@ -3467,19 +3377,16 @@ export default function WorkspacePage() {
 
   useEffect(() => {
     if (!projectId) return undefined;
-    const channel = supabase
-      .channel(`workspace-project-meta-${projectId}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'projects', filter: `id=eq.${projectId}` },
-        (payload) => {
-          const next = payload.new || null;
-          if (next) {
-            setProjectMeta((prev) => ({ ...(prev || {}), ...next }));
-          }
-        },
-      )
-      .subscribe();
+    const channel = createWorkspaceProjectMetaChannel(
+      supabase,
+      projectId,
+      (payload) => {
+        const next = payload.new || null;
+        if (next) {
+          setProjectMeta((prev) => ({ ...(prev || {}), ...next }));
+        }
+      },
+    ).subscribe();
     return () => {
       supabase.removeChannel(channel);
     };
@@ -3559,12 +3466,13 @@ export default function WorkspacePage() {
           // eslint-disable-next-line no-console
           console.error('[WorkspacePage] delete sprint_votes for ended sprint failed', delVotesErr);
         } else {
-          // eslint-disable-next-line no-console
-          console.log('[WorkspacePage] cleared sprint_votes', {
-            projectId,
-            clearedSprintNumber: currentSprint,
-            nextSprint,
-          });
+          if (import.meta.env.DEV) {
+            console.log('[WorkspacePage] cleared sprint_votes', {
+              projectId,
+              clearedSprintNumber: currentSprint,
+              nextSprint,
+            });
+          }
         }
       }
 
