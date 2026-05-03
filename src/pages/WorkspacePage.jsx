@@ -380,7 +380,27 @@ function BlueprintViewer({
   const [draftNote, setDraftNote] = useState('');
   const [imageMenu, setImageMenu] = useState({ open: false, x: 0, y: 0 });
   const [currentUserEmail, setCurrentUserEmail] = useState('');
-  const isReadOnlySprint = Number(viewingSprint) !== Number(currentSprint);
+  const currentSprintNum = Number(currentSprint);
+  /** Timeline `viewingSprint` can be null/0 before meta loads — treat as canonical sprint so markers work. */
+  const effectiveViewingSprint = (() => {
+    const raw = viewingSprint;
+    if (raw == null || raw === '') {
+      return Number.isFinite(currentSprintNum) ? currentSprintNum : 0;
+    }
+    const v = Number(raw);
+    if (!Number.isFinite(v)) {
+      return Number.isFinite(currentSprintNum) ? currentSprintNum : 0;
+    }
+    if (v < 1 && Number.isFinite(currentSprintNum) && currentSprintNum >= 1) {
+      return currentSprintNum;
+    }
+    return v;
+  })();
+  const isReadOnlySprint =
+    Number.isFinite(currentSprintNum) &&
+    currentSprintNum >= 1 &&
+    effectiveViewingSprint !== currentSprintNum;
+  const canAddMarker = Boolean(designImageUrl) && !isReadOnlySprint;
 
   useEffect(() => {
     panXRef.current = panX;
@@ -472,7 +492,7 @@ function BlueprintViewer({
     let alive = true;
 
     async function loadMarkers() {
-      if (!projectId || !Number.isFinite(Number(viewingSprint))) {
+      if (!projectId || !Number.isFinite(Number(effectiveViewingSprint)) || effectiveViewingSprint < 1) {
         setDesignMarkers([]);
         return;
       }
@@ -480,7 +500,7 @@ function BlueprintViewer({
         .from('markers')
         .select('id, project_id, sprint_number, x_pct, y_pct, note, created_by, created_at')
         .eq('project_id', projectId)
-        .eq('sprint_number', Number(viewingSprint))
+        .eq('sprint_number', Number(effectiveViewingSprint))
         .order('created_at', { ascending: true });
       if (!alive) return;
       if (error) {
@@ -504,7 +524,7 @@ function BlueprintViewer({
           console.log('[markers realtime] INSERT payload', payload);
         }
         const payloadSprint = Number(payload?.new?.sprint_number);
-        if (payloadSprint !== Number(viewingSprint)) return;
+        if (payloadSprint !== Number(effectiveViewingSprint)) return;
         const next = normalizeMarkerRow(payload.new);
         if (!next) return;
         setDesignMarkers((prev) => (prev.some((m) => String(m.id) === String(next.id)) ? prev : [...prev, next]));
@@ -536,7 +556,7 @@ function BlueprintViewer({
           });
         }
         const payloadSprint = Number(payload?.new?.sprint_number);
-        if (payloadSprint !== Number(viewingSprint)) return;
+        if (payloadSprint !== Number(effectiveViewingSprint)) return;
         const next = normalizeMarkerRow(payload.new);
         if (!next) {
           console.warn('[markers realtime] UPDATE received without normalizable payload.new', payload);
@@ -571,7 +591,7 @@ function BlueprintViewer({
       alive = false;
       supabase.removeChannel(channel);
     };
-  }, [projectId, viewingSprint]);
+  }, [projectId, viewingSprint, currentSprint, effectiveViewingSprint]);
 
   function viewportCursor() {
     if (isPanning) return 'grabbing';
@@ -649,7 +669,7 @@ function BlueprintViewer({
   }
 
   function toggleMarkerMode() {
-    if (isReadOnlySprint) return;
+    if (!canAddMarker) return;
     if (markerMode) {
       clearPendingDraft();
       setMarkerMode(false);
@@ -677,7 +697,7 @@ function BlueprintViewer({
       skipNextMarkerClick.current = false;
       return;
     }
-    if (!markerMode || handTool || isReadOnlySprint) return;
+    if (!markerMode || handTool || isReadOnlySprint || !designImageUrl) return;
     if (e.target.closest('[data-marker-root]')) return;
     if (!projectId) return;
     const el = canvasRef.current;
@@ -696,7 +716,7 @@ function BlueprintViewer({
       project_id: projectId,
       x_pct: pendingMarker.xPct,
       y_pct: pendingMarker.yPct,
-      sprint_number: Number(viewingSprint),
+      sprint_number: Number(effectiveViewingSprint),
       note: text,
       created_by: currentUserEmail || null,
     };
@@ -1039,6 +1059,7 @@ function BlueprintViewer({
       <div style={{ position: 'absolute', bottom: 16, right: 16, display: 'flex', gap: 4 }}>
         <button
           type="button"
+          disabled={!canAddMarker}
           onClick={(e) => {
             e.stopPropagation();
             toggleMarkerMode();
@@ -1053,11 +1074,11 @@ function BlueprintViewer({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            cursor: isReadOnlySprint ? 'not-allowed' : 'pointer',
+            cursor: canAddMarker ? 'pointer' : 'not-allowed',
             boxShadow: markerMode
               ? '0 1px 6px rgba(208,80,69,0.2)'
               : '0 1px 3px rgba(30,42,53,0.08)',
-            opacity: isReadOnlySprint ? 0.5 : 1,
+            opacity: canAddMarker ? 1 : 0.5,
           }}
         >
           <Icon
@@ -4152,7 +4173,12 @@ export default function WorkspacePage() {
 
   useEffect(() => {
     const current = Number(projectMeta?.sprint_number ?? fallbackProject.sprint ?? 0);
-    setViewingSprint((prev) => (prev == null ? current : prev));
+    setViewingSprint((prev) => {
+      if (prev == null) return current;
+      const p = Number(prev);
+      if (p === 0 && Number.isFinite(current) && current >= 1) return current;
+      return prev;
+    });
   }, [projectMeta?.sprint_number, fallbackProject.sprint]);
 
   useEffect(() => {
