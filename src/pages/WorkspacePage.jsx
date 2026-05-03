@@ -1432,12 +1432,23 @@ function ChatPanel({ projectId, senderRole = 'engineer', width = 220 }) {
 
     if (import.meta.env.DEV) {
       console.log('[handleInvite] Invoking Edge Function invite-project-member', {
-        projectId,
+        projectId: String(projectId),
         email: normalized,
       });
     }
+
+    const { data: sessionData } = await supabase.auth.getSession();
+    const accessToken = sessionData?.session?.access_token ?? null;
+    const invitePayload = {
+      email: normalized,
+      projectId: String(projectId),
+    };
+
     const { error: invokeError } = await supabase.functions.invoke('invite-project-member', {
-      body: { email: normalized, projectId },
+      body: invitePayload,
+      ...(accessToken
+        ? { headers: { Authorization: `Bearer ${accessToken}` } }
+        : {}),
     });
     if (import.meta.env.DEV) {
       console.log('[handleInvite] Edge Function invite-project-member result', {
@@ -1630,111 +1641,127 @@ function ChatPanel({ projectId, senderRole = 'engineer', width = 220 }) {
           </div>
         ) : null}
       </div>
-      {inviteOpen ? (
-        <div
-          role="presentation"
-          onClick={() => setInviteOpen(false)}
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(19,28,36,0.42)',
-            zIndex: 70,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 16,
-          }}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              width: '100%',
-              maxWidth: 360,
-              background: C.white,
-              border: `1px solid ${C.borderSubtle}`,
-              borderRadius: 8,
-              boxShadow: '0 20px 48px rgba(19,28,36,0.26)',
-              padding: 16,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 10,
-            }}
-          >
-            <div style={{ fontSize: 14, fontWeight: 700, color: C.fg1 }}>{t('invite')}</div>
-            <input
-              type="email"
-              value={inviteEmail}
-              onChange={(e) => setInviteEmail(e.target.value)}
-              placeholder={t('inviteEmailPlaceholder')}
-              style={{
-                border: `1px solid ${C.border}`,
-                borderRadius: 4,
-                height: 34,
-                padding: '0 10px',
-                fontSize: 12,
-                color: C.fg1,
-                fontFamily: 'inherit',
-              }}
-            />
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-              <button
-                type="button"
+      {inviteOpen
+        ? createPortal(
+            <>
+              <div
+                role="presentation"
+                aria-hidden="true"
                 onClick={() => setInviteOpen(false)}
                 style={{
-                  height: 30,
-                  borderRadius: 4,
-                  border: `1px solid ${C.border}`,
-                  background: C.white,
-                  color: C.fg2,
-                  padding: '0 10px',
-                  cursor: 'pointer',
-                  fontSize: 12,
-                  fontFamily: 'inherit',
+                  position: 'fixed',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  backgroundColor: 'rgba(0,0,0,0.5)',
+                  zIndex: 9999,
                 }}
-              >
-                {lang === 'ko' ? '취소' : lang === 'zh' ? '取消' : 'Cancel'}
-              </button>
-              <button
-                type="button"
-                onClick={async () => {
-                  const ok = await handleInvite(inviteEmail);
-                  if (ok) {
-                    setTimeout(() => {
-                      setInviteOpen(false);
-                      setInviteEmail('');
-                      setInviteState({ status: 'idle', message: '' });
-                    }, 700);
-                  }
-                }}
-                style={{
-                  height: 30,
-                  borderRadius: 4,
-                  border: 'none',
-                  background: C.emerald,
-                  color: '#fff',
-                  padding: '0 10px',
-                  cursor: 'pointer',
-                  fontSize: 12,
-                  fontFamily: 'inherit',
-                  fontWeight: 600,
-                }}
-              >
-                {t('sendInvite')}
-              </button>
-            </div>
-            {inviteState.message ? (
+              />
               <div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="workspace-invite-dialog-title"
+                onClick={(e) => e.stopPropagation()}
                 style={{
-                  fontSize: 11,
-                  color: inviteState.status === 'error' ? C.coral : C.emerald,
+                  position: 'fixed',
+                  top: '50%',
+                  left: '50%',
+                  transform: 'translate(-50%, -50%)',
+                  zIndex: 10000,
+                  width: 'min(400px, calc(100vw - 32px))',
+                  backgroundColor: C.white,
+                  borderRadius: 12,
+                  padding: 24,
+                  border: `1px solid ${C.borderSubtle}`,
+                  boxShadow: '0 20px 48px rgba(19,28,36,0.26)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 12,
                 }}
               >
-                {inviteState.message}
+                <div
+                  id="workspace-invite-dialog-title"
+                  style={{ fontSize: 14, fontWeight: 700, color: C.fg1 }}
+                >
+                  {t('invite')}
+                </div>
+                <input
+                  type="email"
+                  value={inviteEmail}
+                  onChange={(e) => setInviteEmail(e.target.value)}
+                  placeholder={t('inviteEmailPlaceholder')}
+                  style={{
+                    border: `1px solid ${C.border}`,
+                    borderRadius: 4,
+                    height: 34,
+                    padding: '0 10px',
+                    fontSize: 12,
+                    color: C.fg1,
+                    fontFamily: 'inherit',
+                  }}
+                />
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                  <button
+                    type="button"
+                    onClick={() => setInviteOpen(false)}
+                    style={{
+                      height: 30,
+                      borderRadius: 4,
+                      border: `1px solid ${C.border}`,
+                      background: C.white,
+                      color: C.fg2,
+                      padding: '0 10px',
+                      cursor: 'pointer',
+                      fontSize: 12,
+                      fontFamily: 'inherit',
+                    }}
+                  >
+                    {lang === 'ko' ? '취소' : lang === 'zh' ? '取消' : 'Cancel'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const ok = await handleInvite(inviteEmail);
+                      if (ok) {
+                        setTimeout(() => {
+                          setInviteOpen(false);
+                          setInviteEmail('');
+                          setInviteState({ status: 'idle', message: '' });
+                        }, 700);
+                      }
+                    }}
+                    style={{
+                      height: 30,
+                      borderRadius: 4,
+                      border: 'none',
+                      background: C.emerald,
+                      color: '#fff',
+                      padding: '0 10px',
+                      cursor: 'pointer',
+                      fontSize: 12,
+                      fontFamily: 'inherit',
+                      fontWeight: 600,
+                    }}
+                  >
+                    {t('sendInvite')}
+                  </button>
+                </div>
+                {inviteState.message ? (
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: inviteState.status === 'error' ? C.coral : C.emerald,
+                    }}
+                  >
+                    {inviteState.message}
+                  </div>
+                ) : null}
               </div>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
+            </>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }

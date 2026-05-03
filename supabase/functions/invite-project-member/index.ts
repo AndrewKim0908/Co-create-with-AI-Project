@@ -3,6 +3,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 type InvitePayload = {
   email?: string;
   projectId?: string;
+  /** Alias for clients that send snake_case */
+  project_id?: string;
 };
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
@@ -54,9 +56,17 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: "Unauthorized" }, 401);
     }
 
-    const { email, projectId }: InvitePayload = await req.json();
-    const normalizedEmail = String(email ?? "").trim().toLowerCase();
-    const normalizedProjectId = String(projectId ?? "").trim();
+    let raw: InvitePayload;
+    try {
+      raw = (await req.json()) as InvitePayload;
+    } catch {
+      return jsonResponse({ error: "Invalid JSON body" }, 400);
+    }
+
+    const normalizedEmail = String(raw.email ?? "").trim().toLowerCase();
+    const normalizedProjectId = String(
+      raw.projectId ?? raw.project_id ?? "",
+    ).trim();
 
     if (!normalizedEmail || !normalizedProjectId) {
       return jsonResponse({ error: "email and projectId are required" }, 400);
