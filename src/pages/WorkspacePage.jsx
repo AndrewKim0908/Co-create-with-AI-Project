@@ -1948,7 +1948,7 @@ function ConflictPanel({
   designImageUrls = [],
   isOwner = false,
 }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const [appHov, setAppHov] = useState(false);
   const [conHov, setConHov] = useState(false);
   const [aiAnalysisLoading, setAiAnalysisLoading] = useState(false);
@@ -2631,6 +2631,7 @@ function ConflictPanel({
         chatMessages,
         participants: participantsForAi,
         designImageUrls: Array.isArray(designImageUrls) ? designImageUrls : [],
+        language: lang,
       });
 
       setAiAnalysisResult(result);

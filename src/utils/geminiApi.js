@@ -36,7 +36,23 @@ export async function fetchImageInlinePart(url) {
   }
 }
 
-function buildPrompt(project, chatMessages, participants, hasImages) {
+const LANGUAGE_INSTRUCTION = {
+  en: 'Respond in English. All user-visible strings in the JSON (titles, summaries, messages, topics, pros, cons, etc.) must be in English.',
+  ko: '한국어로 응답해 주세요. JSON 안의 사용자에게 보이는 모든 문자열(제목, 요약, 메시지, 주제, 장단점 등)은 한국어여야 합니다.',
+  zh: '请用中文回答。JSON 中所有面向用户的可见字符串（标题、摘要、消息、主题、优缺点等）必须使用中文。',
+};
+
+function buildPrompt({
+  project,
+  chatMessages,
+  participants,
+  hasImages,
+  language = 'en',
+}) {
+  const langKey = language === 'ko' || language === 'zh' ? language : 'en';
+  const languageInstruction =
+    LANGUAGE_INSTRUCTION[langKey] || LANGUAGE_INSTRUCTION.en;
+
   const p = project || {};
   const priAF = p.priority_aesthetics_functionality;
   const priCQ = p.priority_cost_quality;
@@ -59,6 +75,8 @@ function buildPrompt(project, chatMessages, participants, hasImages) {
 
   return `You are an expert product/engineering facilitator analyzing a design sprint conflict.
 
+IMPORTANT: ${languageInstruction}
+
 PROJECT
 - name: ${p.name ?? ''}
 - short description: ${p.description_short ?? ''}
@@ -76,9 +94,9 @@ ${chatBlock || '(empty)'}
 ${imgNote}
 
 TASK
-1) If there is not enough discussion to analyze (e.g. almost no messages, or no meaningful disagreement), return JSON with canAnalyze: false, reason: "insufficient_chat", message in Korean, and details array listing each participant with userName, currentCount (estimate messages attributed to them), required: 3.
-2) If more thematic context is needed before a solid analysis, return canAnalyze: false, reason: "need_more_context", message in Korean, suggestedTopics as strings in Korean.
-3) Otherwise return canAnalyze: true with a full structured analysis in Korean where appropriate for user-visible text.
+1) If there is not enough discussion to analyze (e.g. almost no messages, or no meaningful disagreement), return JSON with canAnalyze: false, reason: "insufficient_chat", message in the response language above, and details array listing each participant with userName, currentCount (estimate messages attributed to them), required: 3.
+2) If more thematic context is needed before a solid analysis, return canAnalyze: false, reason: "need_more_context", message in the response language above, suggestedTopics as strings in that same language.
+3) Otherwise return canAnalyze: true with a full structured analysis; all user-visible text fields must follow the response language above.
 
 When canAnalyze is true, use exactly this JSON shape (no markdown fences):
 {
@@ -231,6 +249,7 @@ export function normalizeAnalysisResult(raw) {
  *   chatMessages: Array<{ content: string, senderName: string, senderRole: string }>,
  *   participants: Array<{ userId: string, name: string, role: string }>,
  *   designImageUrls?: string[],
+ *   language?: 'en' | 'ko' | 'zh',
  * }} input
  */
 export async function requestGeminiAnalysis({
@@ -238,6 +257,7 @@ export async function requestGeminiAnalysis({
   chatMessages,
   participants,
   designImageUrls = [],
+  language = 'en',
 }) {
   const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
   if (!apiKey || String(apiKey).trim() === '') {
@@ -252,7 +272,15 @@ export async function requestGeminiAnalysis({
     if (part) imageParts.push(part);
   }
 
-  const textPrompt = buildPrompt(project, chatMessages, participants, imageParts.length > 0);
+  const lang =
+    language === 'ko' || language === 'zh' ? language : 'en';
+  const textPrompt = buildPrompt({
+    project,
+    chatMessages,
+    participants,
+    hasImages: imageParts.length > 0,
+    language: lang,
+  });
   const parts = [{ text: textPrompt }, ...imageParts];
 
   const url = `${GEMINI_API_URL}?key=${encodeURIComponent(apiKey)}`;
