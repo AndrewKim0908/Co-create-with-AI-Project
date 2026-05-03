@@ -200,6 +200,12 @@ function DesignMarker({
         }}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
+        onContextMenu={(e) => {
+          if (isPending || !canDelete) return;
+          e.preventDefault();
+          e.stopPropagation();
+          setDeleteMenu(true);
+        }}
       >
         <div style={{ position: 'relative', width: 14, height: 14 }}>
           {canDelete && !isPending && hovered ? (
@@ -210,7 +216,7 @@ function DesignMarker({
               onClick={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                if (window.confirm(deleteAsk)) onDelete();
+                if (window.confirm(deleteAsk)) onDelete(marker.id);
               }}
               style={{
                 position: 'absolute',
@@ -237,12 +243,6 @@ function DesignMarker({
           <div
             ref={anchorRef}
             data-marker-dot
-            onContextMenu={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              if (isPending || !canDelete) return;
-              setDeleteMenu(true);
-            }}
             style={{
               width: 14,
               height: 14,
@@ -347,7 +347,7 @@ function DesignMarker({
                 type="button"
                 onClick={() => {
                   setDeleteMenu(false);
-                  onDelete();
+                  onDelete(marker.id);
                 }}
                 style={{
                   padding: '4px 10px',
@@ -879,6 +879,7 @@ function BlueprintViewer({
             src={designImageUrl}
             alt="Uploaded design"
             onContextMenu={(e) => {
+              if (e.target.closest?.('[data-marker-root]')) return;
               e.preventDefault();
               e.stopPropagation();
               setImageMenu({ open: true, x: e.clientX, y: e.clientY });
@@ -900,10 +901,7 @@ function BlueprintViewer({
           (() => {
             const markerEmail = String(m.createdBy || '').trim().toLowerCase();
             const myEmail = String(currentUserEmail || '').trim().toLowerCase();
-            const isMine =
-              !isReadOnlySprint &&
-              Boolean(myEmail) &&
-              (Boolean(markerEmail && markerEmail === myEmail) || !markerEmail);
+            const canDeleteMarker = Boolean(myEmail) && !isReadOnlySprint;
             const markerUserColor = getUserColor(markerEmail);
             return (
           <DesignMarker
@@ -914,11 +912,11 @@ function BlueprintViewer({
             onDraftChange={setDraftNote}
             onConfirmNote={confirmPendingNote}
             onCancelPending={cancelPending}
-            canDelete={isMine}
+            canDelete={canDeleteMarker}
             markerColor={markerUserColor}
             noteColor={markerUserColor}
-            onDelete={async () => {
-              await deleteMarkerById(m.id);
+            onDelete={async (markerId) => {
+              await deleteMarkerById(markerId);
             }}
           />
             );
