@@ -4136,6 +4136,22 @@ export default function WorkspacePage() {
   };
   /** Matches header “Sprint #…”; timeline `viewingSprint` can differ when browsing past dots. sprint_votes use this sprint. */
   const workspaceCanonicalSprint = Number(projectMeta?.sprint_number ?? fallbackProject.sprint ?? 0);
+  /** Align design file load / upload sprint with `BlueprintViewer` marker logic when `viewingSprint` is null or 0 before sync. */
+  const workspaceEffectiveViewingSprint = (() => {
+    const currentSprintNum = workspaceCanonicalSprint;
+    const raw = viewingSprint;
+    if (raw == null || raw === '') {
+      return Number.isFinite(currentSprintNum) ? currentSprintNum : 0;
+    }
+    const v = Number(raw);
+    if (!Number.isFinite(v)) {
+      return Number.isFinite(currentSprintNum) ? currentSprintNum : 0;
+    }
+    if (v < 1 && Number.isFinite(currentSprintNum) && currentSprintNum >= 1) {
+      return currentSprintNum;
+    }
+    return v;
+  })();
   const conflictPanelSprintNumber =
     Number.isFinite(workspaceCanonicalSprint) && workspaceCanonicalSprint >= 1
       ? Math.trunc(workspaceCanonicalSprint)
@@ -4345,25 +4361,29 @@ export default function WorkspacePage() {
 
   useEffect(() => {
     async function loadLatestDesign() {
-      if (!Number.isFinite(Number(viewingSprint))) {
+      if (
+        !Number.isFinite(Number(workspaceEffectiveViewingSprint)) ||
+        workspaceEffectiveViewingSprint < 1
+      ) {
         setDesignImage({ id: null, url: '', storagePath: '' });
         return;
       }
+      const sprintKey = Number(workspaceEffectiveViewingSprint);
       let base = supabase
         .from('design_files')
-        .select('id, file_url, created_at, project_id, sprint_number')
+        .select('*')
         .order('created_at', { ascending: false })
         .limit(1);
       let query = projectId ? base.eq('project_id', projectId) : base;
-      query = query.eq('sprint_number', Number(viewingSprint));
+      query = query.eq('sprint_number', sprintKey);
       let { data, error } = await query;
       if (error && /project_id/i.test(error.message || '')) {
         base = supabase
           .from('design_files')
-          .select('id, file_url, created_at, sprint_number')
+          .select('*')
           .order('created_at', { ascending: false })
           .limit(1);
-        ({ data, error } = await base.eq('sprint_number', Number(viewingSprint)));
+        ({ data, error } = await base.eq('sprint_number', sprintKey));
       }
       if (error) return;
       const row = data?.[0];
@@ -4380,7 +4400,7 @@ export default function WorkspacePage() {
         (payload) => {
           const next = payload.new || {};
           if (projectId && String(next.project_id) !== String(projectId)) return;
-          if (Number(next.sprint_number) !== Number(viewingSprint)) return;
+          if (Number(next.sprint_number) !== Number(workspaceEffectiveViewingSprint)) return;
           const nextUrl = next.file_url || next.url;
           if (nextUrl) {
             setDesignImage(mapDesignFileRow(next));
@@ -4393,7 +4413,7 @@ export default function WorkspacePage() {
         (payload) => {
           const prev = payload.old || {};
           if (projectId && String(prev.project_id) !== String(projectId)) return;
-          if (Number(prev.sprint_number) !== Number(viewingSprint)) return;
+          if (Number(prev.sprint_number) !== Number(workspaceEffectiveViewingSprint)) return;
           const deletedId = prev.id || null;
           setDesignImage((curr) => {
             if (!curr.url) return curr;
@@ -4409,7 +4429,7 @@ export default function WorkspacePage() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [projectId, viewingSprint]);
+  }, [projectId, viewingSprint, workspaceCanonicalSprint]);
 
   function handleSprintSelect(nextSprint) {
     setViewingSprint(Number(nextSprint));
@@ -4438,8 +4458,9 @@ export default function WorkspacePage() {
       return;
     }
 
-    const targetSprint = Number.isFinite(Number(viewingSprint))
-      ? Number(viewingSprint)
+    const targetSprint = Number.isFinite(Number(workspaceEffectiveViewingSprint)) &&
+      workspaceEffectiveViewingSprint >= 1
+      ? Number(workspaceEffectiveViewingSprint)
       : Number(projectMeta?.sprint_number ?? fallbackProject.sprint ?? 0);
     let { error } = await supabase.from('design_files').insert({
       file_url: publicUrl,
@@ -4701,7 +4722,7 @@ export default function WorkspacePage() {
             timelineAnchorSeed={
               projectId != null ? `${projectId}|${projectMeta?.sprint_number ?? 'pending'}` : ''
             }
-            designImageUrl={designImage.url}
+            designImageUrl={String(designImage?.url || '').trim()}
             onUploadImage={onUploadImage}
             onDeleteImage={onDeleteImage}
             uploadState={uploadState}
