@@ -1946,6 +1946,7 @@ function ConflictPanel({
   onReachConsensus,
   geminiProject = null,
   designImageUrls = [],
+  isOwner = false,
 }) {
   const { t } = useLang();
   const [appHov, setAppHov] = useState(false);
@@ -1962,6 +1963,7 @@ function ConflictPanel({
   const [participants, setParticipants] = useState([]);
   const [voteMap, setVoteMap] = useState({});
   const [authUid, setAuthUid] = useState(null);
+  const participantsRef = useRef([]);
   const unanimousNavLockRef = useRef(false);
   /** Broadcast + postgres listener share this subscription (postges may not reach peer clients under some RLS/Realtime setups). */
   const voteSyncChannelRef = useRef(null);
@@ -1970,6 +1972,10 @@ function ConflictPanel({
   useEffect(() => {
     onApproveRef.current = onApprove;
   }, [onApprove]);
+
+  useEffect(() => {
+    participantsRef.current = participants;
+  }, [participants]);
 
   const sprintVoteKeyOk = Boolean(
     projectId && resolveSprintVotesSprintNumber(sprintNumber) != null,
@@ -2000,6 +2006,10 @@ function ConflictPanel({
     }
 
     const next = {};
+    (participantsRef.current || []).forEach((p) => {
+      const uid = normalizeParticipantUserId(p.userId);
+      if (uid && !(uid in next)) next[uid] = null;
+    });
     (data || []).forEach((r) => {
       const uid = normalizeParticipantUserId(r.user_id);
       if (!uid) return;
@@ -2271,11 +2281,70 @@ function ConflictPanel({
 
   useEffect(() => {
     loadVotes();
-  }, [loadVotes]);
+  }, [loadVotes, participants]);
 
   useEffect(() => {
     loadParticipants();
   }, [loadParticipants]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadStoredAnalysis() {
+      const sn = resolveSprintVotesSprintNumber(sprintNumber);
+      if (!projectId || sn == null) {
+        if (!cancelled) setAiAnalysisResult(null);
+        return;
+      }
+      const { data, error } = await supabase
+        .from('sprint_ai_analysis')
+        .select('analysis_result')
+        .eq('project_id', projectId)
+        .eq('sprint_number', sn)
+        .maybeSingle();
+      if (cancelled) return;
+      if (error && import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.warn('[ConflictPanel] sprint_ai_analysis load', error.message);
+      }
+      if (data?.analysis_result) {
+        setAiAnalysisResult(data.analysis_result);
+      } else if (!cancelled) {
+        setAiAnalysisResult(null);
+      }
+    }
+    loadStoredAnalysis();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, sprintNumber]);
+
+  useEffect(() => {
+    if (!projectId) return undefined;
+    const channelName = `sprint-ai-analysis-${projectId}`;
+    const ch = supabase
+      .channel(channelName)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'sprint_ai_analysis',
+          filter: `project_id=eq.${projectId}`,
+        },
+        (payload) => {
+          const row = payload.new ?? payload.old ?? null;
+          if (!row?.analysis_result) return;
+          const rowSn = resolveSprintVotesSprintNumber(row.sprint_number);
+          const sn = resolveSprintVotesSprintNumber(sprintNumber);
+          if (rowSn == null || sn == null || rowSn !== sn) return;
+          setAiAnalysisResult(row.analysis_result);
+        },
+      )
+      .subscribe();
+    return () => {
+      void supabase.removeChannel(ch);
+    };
+  }, [projectId, sprintNumber]);
 
   /**
    * Vote sync Realtime on one channel per project:
@@ -2508,8 +2577,27 @@ function ConflictPanel({
     await castVote(VOTE_STATUS.OPPOSE);
   }
 
+  async function saveAnalysisResult(result) {
+    const sn = resolveSprintVotesSprintNumber(sprintNumber);
+    if (!projectId || sn == null || !isOwner || !authUid) return;
+    const { error } = await supabase.from('sprint_ai_analysis').upsert(
+      {
+        project_id: projectId,
+        sprint_number: sn,
+        analysis_result: result,
+        created_by: authUid,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'project_id,sprint_number' },
+    );
+    if (error && import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.warn('[ConflictPanel] sprint_ai_analysis upsert', error.message);
+    }
+  }
+
   async function handleRequestAIAnalysis() {
-    if (aiAnalysisLoading) return;
+    if (!isOwner || aiAnalysisLoading) return;
     setAiAnalysisLoading(true);
     setAiAnalysisResult(null);
     try {
@@ -2546,20 +2634,24 @@ function ConflictPanel({
       });
 
       setAiAnalysisResult(result);
+      await saveAnalysisResult(result);
     } catch (error) {
       // eslint-disable-next-line no-console
       console.error('AI Analysis failed:', error);
-      setAiAnalysisResult({
+      const errPayload = {
         canAnalyze: false,
         reason: 'error',
         message: `${t('aiAnalysisErrorPrefix')}${error?.message || String(error)}`,
-      });
+      };
+      setAiAnalysisResult(errPayload);
+      await saveAnalysisResult(errPayload);
     } finally {
       setAiAnalysisLoading(false);
     }
   }
 
   function switchMockScenario(scenario) {
+    if (!isOwner) return;
     if (scenario === 'normal') setAiAnalysisResult(mockAIAnalysisResult);
     if (scenario === 'insufficient') setAiAnalysisResult(mockInsufficientChat);
   }
@@ -2635,52 +2727,65 @@ function ConflictPanel({
               top: 0,
               zIndex: 10,
               background: C.white,
-              padding: 16,
+              padding: isOwner ? 16 : '12px 16px',
               borderBottom: `1px solid ${C.borderSubtle}`,
               boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
             }}
           >
-            <button
-              type="button"
-              disabled={aiAnalysisLoading}
-              onClick={handleRequestAIAnalysis}
-              style={{
-                width: '100%',
-                padding: '12px',
-                borderRadius: 6,
-                fontSize: 11,
-                fontWeight: 600,
-                fontFamily: 'inherit',
-                border: `1px solid ${C.emeraldBorder}`,
-                background: aiAnalysisResult && !aiAnalysisLoading ? C.emeraldLight : C.white,
-                color: aiAnalysisResult && !aiAnalysisLoading ? C.emerald : C.fg2,
-                cursor: aiAnalysisLoading ? 'wait' : 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 8,
-                transition: 'background 160ms, color 160ms',
-              }}
-            >
-              {aiAnalysisLoading ? (
-                <>
-                  <span className="conflict-spin" style={{ display: 'inline-flex' }}>
-                    <Icon name="loader" size={14} color={C.emerald} />
-                  </span>
-                  <span>{t('requestAiAnalysisBtn')}</span>
-                </>
-              ) : aiAnalysisResult ? (
-                <>
-                  <Icon name="check-circle" size={14} color={C.emerald} />
-                  <span>{t('aiAnalysisComplete')}</span>
-                </>
-              ) : (
-                <>
-                  <Icon name="sparkles" size={16} color={C.emerald} />
-                  <span>{t('requestAiAnalysisBtn')}</span>
-                </>
-              )}
-            </button>
+            {isOwner ? (
+              <button
+                type="button"
+                disabled={aiAnalysisLoading}
+                onClick={handleRequestAIAnalysis}
+                style={{
+                  width: '100%',
+                  padding: '12px',
+                  borderRadius: 6,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  fontFamily: 'inherit',
+                  border: `1px solid ${C.emeraldBorder}`,
+                  background: aiAnalysisResult && !aiAnalysisLoading ? C.emeraldLight : C.white,
+                  color: aiAnalysisResult && !aiAnalysisLoading ? C.emerald : C.fg2,
+                  cursor: aiAnalysisLoading ? 'wait' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  transition: 'background 160ms, color 160ms',
+                }}
+              >
+                {aiAnalysisLoading ? (
+                  <>
+                    <span className="conflict-spin" style={{ display: 'inline-flex' }}>
+                      <Icon name="loader" size={14} color={C.emerald} />
+                    </span>
+                    <span>{t('requestAiAnalysisBtn')}</span>
+                  </>
+                ) : aiAnalysisResult ? (
+                  <>
+                    <Icon name="check-circle" size={14} color={C.emerald} />
+                    <span>{t('aiAnalysisComplete')}</span>
+                  </>
+                ) : (
+                  <>
+                    <Icon name="sparkles" size={16} color={C.emerald} />
+                    <span>{t('requestAiAnalysisBtn')}</span>
+                  </>
+                )}
+              </button>
+            ) : (
+              <div
+                style={{
+                  fontSize: 10,
+                  lineHeight: 1.45,
+                  color: C.fg3,
+                  textAlign: 'center',
+                }}
+              >
+                {t('aiAnalysisReadOnlyHint')}
+              </div>
+            )}
           </div>
 
           <div
@@ -2732,9 +2837,19 @@ function ConflictPanel({
                 {t('aiAnalysisPlaceholderTitle')}
               </h3>
               <p style={{ margin: 0, fontSize: 11, color: C.fg3, lineHeight: 1.5 }}>
-                {t('aiAnalysisPlaceholderLine1')}
-                <br />
-                {t('aiAnalysisPlaceholderLine2')}
+                {isOwner ? (
+                  <>
+                    {t('aiAnalysisPlaceholderLine1')}
+                    <br />
+                    {t('aiAnalysisPlaceholderLine2')}
+                  </>
+                ) : (
+                  <>
+                    {t('aiAnalysisMemberPlaceholderLine1')}
+                    <br />
+                    {t('aiAnalysisMemberPlaceholderLine2')}
+                  </>
+                )}
               </p>
             </div>
           ) : null}
@@ -3369,7 +3484,7 @@ function ConflictPanel({
             </>
           ) : null}
 
-          {import.meta.env.DEV ? (
+          {import.meta.env.DEV && isOwner ? (
             <div
               style={{
                 marginTop: 8,
@@ -3943,6 +4058,17 @@ export default function WorkspacePage() {
   const [conflictHandleHov, setConflictHandleHov] = useState(false);
   const chatResizeRef = useRef(null);
   const conflictResizeRef = useRef(null);
+  const [workspaceAuthUid, setWorkspaceAuthUid] = useState(null);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      setWorkspaceAuthUid(normalizeParticipantUserId(data?.user?.id ?? null));
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setWorkspaceAuthUid(normalizeParticipantUserId(session?.user?.id ?? null));
+    });
+    return () => listener.subscription.unsubscribe();
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -3989,6 +4115,13 @@ export default function WorkspacePage() {
     Number.isFinite(workspaceCanonicalSprint) && workspaceCanonicalSprint >= 1
       ? Math.trunc(workspaceCanonicalSprint)
       : null;
+
+  const conflictPanelIsOwner = Boolean(
+    workspaceAuthUid &&
+      projectMeta?.user_id &&
+      String(normalizeParticipantUserId(workspaceAuthUid)) ===
+        String(normalizeParticipantUserId(projectMeta.user_id)),
+  );
 
   useEffect(() => {
     if (!projectId) return;
@@ -4668,6 +4801,7 @@ export default function WorkspacePage() {
             priority_speed_stability: projectMeta?.priority_speed_stability ?? null,
           }}
           designImageUrls={designImage?.url ? [designImage.url] : []}
+          isOwner={conflictPanelIsOwner}
         />
       </div>
       {deleteSprintTarget ? (
