@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://co-create-project-with-ai.netlify.app/sitemap.xml
