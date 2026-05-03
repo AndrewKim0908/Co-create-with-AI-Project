@@ -37,14 +37,6 @@ import {
 /** Prevents duplicate onApprove under React StrictMode / double effects (module-scoped). */
 let conflictUnanimousNavToken = null;
 
-/** message-square 실루엣 — 내부 흰색 채움 + 테두리 (커서용) */
-const MARKER_CURSOR_SVG =
-  '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" fill="#ffffff" stroke="#3A4A58" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-const MARKER_MODE_CURSOR =
-  typeof btoa !== 'undefined'
-    ? `url("data:image/svg+xml;base64,${btoa(MARKER_CURSOR_SVG)}") 2 18, crosshair`
-    : `url("data:image/svg+xml;charset=utf-8,${encodeURIComponent(MARKER_CURSOR_SVG)}") 2 18, crosshair`;
-
 const ZOOM_MIN = 0.2;
 const ZOOM_MAX = 5;
 
@@ -210,6 +202,38 @@ function DesignMarker({
         onMouseLeave={() => setHovered(false)}
       >
         <div style={{ position: 'relative', width: 14, height: 14 }}>
+          {canDelete && !isPending && hovered ? (
+            <button
+              type="button"
+              aria-label={deleteBtn}
+              title={deleteBtn}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (window.confirm(deleteAsk)) onDelete();
+              }}
+              style={{
+                position: 'absolute',
+                right: -10,
+                top: -10,
+                width: 18,
+                height: 18,
+                padding: 0,
+                lineHeight: '16px',
+                fontSize: 12,
+                fontWeight: 700,
+                borderRadius: '50%',
+                border: `1px solid ${C.borderSubtle}`,
+                background: C.white,
+                color: C.coral,
+                cursor: 'pointer',
+                boxShadow: '0 2px 6px rgba(30,42,53,0.12)',
+                zIndex: 2,
+              }}
+            >
+              ×
+            </button>
+          ) : null}
           <div
             ref={anchorRef}
             data-marker-dot
@@ -402,7 +426,8 @@ function BlueprintViewer({
     Number.isFinite(effectiveViewingSprint) &&
     effectiveViewingSprint >= 1 &&
     effectiveViewingSprint !== currentSprintNum;
-  const canAddMarker = Boolean(designImageUrl) && !isReadOnlySprint;
+  /** 버튼 활성화 확인용: 항상 켜 둠. 실제 찍기는 `designImageUrl` / read-only에서 제한. */
+  const canAddMarker = true;
 
   useEffect(() => {
     panXRef.current = panX;
@@ -598,7 +623,7 @@ function BlueprintViewer({
   function viewportCursor() {
     if (isPanning) return 'grabbing';
     if (handTool || spaceHeld) return 'grab';
-    if (markerMode && !isReadOnlySprint) return MARKER_MODE_CURSOR;
+    if (markerMode) return 'crosshair';
     return 'default';
   }
 
@@ -660,8 +685,12 @@ function BlueprintViewer({
   }
 
   async function deleteMarkerById(markerId) {
-    if (!markerId) return;
-    await supabase.from('markers').delete().eq('id', markerId);
+    if (!markerId || markerId === '__draft_marker__') return;
+    const { error } = await supabase.from('markers').delete().eq('id', markerId);
+    if (error) {
+      console.error('[BlueprintViewer] Failed to delete marker', { markerId, error });
+      return;
+    }
     setDesignMarkers((prev) => prev.filter((m) => String(m.id) !== String(markerId)));
   }
 
@@ -671,11 +700,14 @@ function BlueprintViewer({
   }
 
   function toggleMarkerMode() {
-    if (!canAddMarker) return;
     if (markerMode) {
       clearPendingDraft();
       setMarkerMode(false);
     } else {
+      if (!String(designImageUrl || '').trim()) {
+        window.alert('먼저 디자인 이미지를 업로드해 주세요.');
+        return;
+      }
       setHandTool(false);
       setMarkerMode(true);
     }
@@ -699,7 +731,7 @@ function BlueprintViewer({
       skipNextMarkerClick.current = false;
       return;
     }
-    if (!canAddMarker) return;
+    if (!String(designImageUrl || '').trim()) return;
     if (!markerMode || handTool) return;
     if (e.target.closest('[data-marker-root]')) return;
     if (!projectId) return;
@@ -868,7 +900,10 @@ function BlueprintViewer({
           (() => {
             const markerEmail = String(m.createdBy || '').trim().toLowerCase();
             const myEmail = String(currentUserEmail || '').trim().toLowerCase();
-            const isMine = Boolean(markerEmail && myEmail && markerEmail === myEmail) && !isReadOnlySprint;
+            const isMine =
+              !isReadOnlySprint &&
+              Boolean(myEmail) &&
+              (Boolean(markerEmail && markerEmail === myEmail) || !markerEmail);
             const markerUserColor = getUserColor(markerEmail);
             return (
           <DesignMarker
@@ -1062,7 +1097,6 @@ function BlueprintViewer({
       <div style={{ position: 'absolute', bottom: 16, right: 16, display: 'flex', gap: 4 }}>
         <button
           type="button"
-          disabled={!canAddMarker}
           onClick={(e) => {
             e.stopPropagation();
             toggleMarkerMode();
@@ -1077,11 +1111,11 @@ function BlueprintViewer({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            cursor: canAddMarker ? 'pointer' : 'not-allowed',
+            cursor: 'pointer',
             boxShadow: markerMode
               ? '0 1px 6px rgba(208,80,69,0.2)'
               : '0 1px 3px rgba(30,42,53,0.08)',
-            opacity: canAddMarker ? 1 : 0.5,
+            opacity: 1,
           }}
         >
           <Icon
