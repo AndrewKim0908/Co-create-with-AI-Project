@@ -22,7 +22,7 @@ export default function ConsensusPage() {
     if (!projectId) return;
     supabase
       .from('projects')
-      .select('consensus_note, sprint_number')
+      .select('consensus_note, sprint_number, is_completed, start_date, due_date')
       .eq('id', projectId)
       .single()
       .then(({ data }) => {

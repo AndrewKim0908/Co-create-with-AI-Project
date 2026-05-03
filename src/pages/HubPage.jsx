@@ -2,88 +2,90 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Header from '@/components/Header';
 import Btn from '@/components/Btn';
-import StatusBadge from '@/components/StatusBadge';
 import Icon from '@/components/Icon';
 import CollapsibleSection from '@/components/CollapsibleSection';
 import { C } from '@/constants/colors';
-import { TEAM_DOT } from '@/constants/projects';
 import { useLang } from '@/i18n/LangContext';
 import { supabase } from '@/lib/supabase';
+import NewProjectModal from '@/components/NewProjectModal';
+import EditProjectModal from '@/components/EditProjectModal';
+import ProjectOverviewModal from '@/components/ProjectOverviewModal';
+import { projectShortDescription } from '@/utils/projectDisplay';
+import {
+  calculateDateProgress,
+  formatTimelineStatusLabel,
+  getProgressTimelineMeta,
+} from '@/utils/projectProgress';
 
 /** Supabase `projects` row → card UI shape (DB에 없는 필드는 UI용 기본값) */
-function mapRowToProject(row, lang) {
-  const s = (row.status || 'Pending').toLowerCase();
-  const cardStatus =
-    s === 'completed' ? 'completed'
-    : s === 'archived' ? 'inactive'
-    : s === 'active' ? 'active'
-    : s === 'pending' ? 'pending'
-    : 'pending';
-
+function mapRowToProject(row, lang, userId) {
   const locale = lang === 'ko' ? 'ko-KR' : lang === 'zh' ? 'zh-CN' : 'en-US';
   const updated = row.created_at
     ? new Date(row.created_at).toLocaleString(locale, { dateStyle: 'medium', timeStyle: 'short' })
     : '';
 
+  const startDate = row.start_date ?? null;
+  const dueDate = row.due_date ?? null;
+  const progressMeta = getProgressTimelineMeta(startDate, dueDate);
+
   return {
     id: row.id,
     name: row.name,
-    description: row.description || '',
-    team: '—',
-    status: cardStatus,
+    description: projectShortDescription(row),
     conflicts: 0,
     consensus: 0,
     sprint: Number(row.sprint_number) || 0,
-    progress: Math.min(100, Math.max(0, Number(row.progress) || 0)),
-    risk: 'low',
+    progress: progressMeta.progress,
+    start_date: startDate,
+    due_date: dueDate,
+    progressMeta,
     updated,
+    is_completed: Boolean(row.is_completed),
+    canManage: Boolean(userId && row.user_id === userId),
   };
 }
 
-function ProjectCard({ project: p, onRename, onToggleStatus, onInlineUpdate }) {
+const MENU_ITEM_BTN = {
+  width: '100%',
+  border: 'none',
+  background: 'transparent',
+  textAlign: 'left',
+  borderRadius: 6,
+  padding: '7px 8px',
+  fontSize: 12.5,
+  color: C.fg1,
+  cursor: 'pointer',
+  fontFamily: 'inherit',
+};
+
+function ProjectCard({
+  project: p,
+  onEditSettings,
+  onViewOverview,
+  onToggleCompleted,
+  onDeleteProject,
+  completedSection,
+}) {
   const navigate = useNavigate();
-  const { t, lang } = useLang();
+  const { t } = useLang();
   const [hov, setHov] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [editingName, setEditingName] = useState(false);
-  const [editingDesc, setEditingDesc] = useState(false);
-  const [nameDraft, setNameDraft] = useState(p.name || '');
-  const [descDraft, setDescDraft] = useState(p.description || '');
   const menuRef = useRef(null);
 
-  useEffect(() => {
-    if (!editingName) setNameDraft(p.name || '');
-  }, [p.name, editingName]);
+  /** Single source for bar width + % text (ignore DB `progress` when dates drive the UI). */
+  const timelineMeta = getProgressTimelineMeta(p.start_date ?? null, p.due_date ?? null);
+  const calculatedProgress = timelineMeta.progress;
 
-  useEffect(() => {
-    if (!editingDesc) setDescDraft(p.description || '');
-  }, [p.description, editingDesc]);
+  const progressStatusColor =
+    p.due_date && timelineMeta.variant === 'overdue'
+      ? '#dc2626'
+      : p.due_date && timelineMeta.variant === 'warning'
+        ? '#ea580c'
+        : C.fg3;
 
-  async function commitNameEdit() {
-    if (!editingName) return;
-    const nextName = nameDraft.trim();
-    setEditingName(false);
-    if (!nextName || nextName === (p.name || '').trim()) return;
-    await onInlineUpdate(p.id, { name: nextName });
-  }
-
-  async function commitDescEdit() {
-    if (!editingDesc) return;
-    const nextDescription = descDraft.trim();
-    setEditingDesc(false);
-    if (nextDescription === (p.description || '').trim()) return;
-    await onInlineUpdate(p.id, { description: nextDescription });
-  }
-
-  const riskColor = { high: C.coral,        medium: C.amber,         low: C.emerald };
-  const riskLabel = { high: t('riskHigh'),  medium: t('riskMedium'), low: t('riskLow') };
-  const dotColor  = TEAM_DOT[p.team] || C.fg3;
-
-  const stripeColor =
-    p.status === 'active'    ? C.emerald
-    : p.status === 'pending' ? C.amber
-    : p.status === 'completed' ? C.fg4
-    : C.fg4;
+  const stripeColor = completedSection ? '#94a3b8' : C.emerald;
+  const cardBg = completedSection ? '#eef0f3' : C.white;
+  const cardBorder = completedSection ? '#d8dce2' : undefined;
 
   useEffect(() => {
     if (!menuOpen) return undefined;
@@ -98,15 +100,12 @@ function ProjectCard({ project: p, onRename, onToggleStatus, onInlineUpdate }) {
 
   return (
     <div
-      onClick={() => {
-        if (editingName || editingDesc) return;
-        navigate(`/project/${p.id}/sprints`);
-      }}
+      onClick={() => navigate(`/project/${p.id}/sprints`)}
       onMouseEnter={() => setHov(true)}
       onMouseLeave={() => setHov(false)}
       style={{
-        background: C.white,
-        border: `1px solid ${hov ? C.border : C.borderSubtle}`,
+        background: cardBg,
+        border: `1px solid ${cardBorder ?? (hov ? C.border : C.borderSubtle)}`,
         borderRadius: 6,
         boxShadow: hov ? '0 4px 12px rgba(30,42,53,0.10)' : '0 1px 3px rgba(30,42,53,0.07)',
         cursor: 'pointer', transition: 'all 160ms', overflow: 'hidden',
@@ -118,67 +117,49 @@ function ProjectCard({ project: p, onRename, onToggleStatus, onInlineUpdate }) {
           <div style={{ minWidth: 0 }}>
             <div
               style={{
-                display: 'flex', alignItems: 'center', gap: 8,
-                fontSize: 13, fontWeight: 600, color: C.fg1,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                minWidth: 0,
+                flexWrap: 'wrap',
               }}
             >
-              <span
-                aria-hidden="true"
-                title={p.team}
+              <div
                 style={{
-                  width: 8, height: 8, borderRadius: '50%',
-                  background: dotColor,
-                  boxShadow: `0 0 0 2px ${dotColor}22`,
-                  flexShrink: 0,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: C.fg1,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  minWidth: 0,
+                  flex: '1 1 auto',
                 }}
-              />
-              {editingName ? (
-                <input
-                  value={nameDraft}
-                  onChange={(e) => setNameDraft(e.target.value)}
-                  onBlur={commitNameEdit}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      commitNameEdit();
-                    } else if (e.key === 'Escape') {
-                      setEditingName(false);
-                      setNameDraft(p.name || '');
-                    }
-                  }}
-                  onClick={(e) => e.stopPropagation()}
-                  autoFocus
-                  style={{
-                    minWidth: 100,
-                    maxWidth: 220,
-                    fontSize: 13,
-                    fontWeight: 600,
-                    color: C.fg1,
-                    border: `1px solid ${C.border}`,
-                    borderRadius: 4,
-                    padding: '2px 6px',
-                    fontFamily: 'inherit',
-                  }}
-                />
-              ) : (
+              >
+                {p.name}
+              </div>
+              {p.canManage ? (
                 <span
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setEditingName(true);
+                  style={{
+                    padding: '2px 8px',
+                    background: C.emeraldLight,
+                    color: C.emerald,
+                    border: `1px solid ${C.emeraldBorder}`,
+                    borderRadius: 4,
+                    fontSize: 10,
+                    fontWeight: 600,
+                    flexShrink: 0,
                   }}
-                  title={lang === 'ko' ? '클릭하여 이름 수정' : 'Click to edit name'}
-                  style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
                 >
-                  {p.name}
+                  {t('hubOwnerBadge')}
                 </span>
-              )}
+              ) : null}
             </div>
-            <div style={{ fontSize: 11, color: C.fg3, marginTop: 4, marginLeft: 16 }}>
-              {p.team} · Sprint #{p.sprint}
+            <div style={{ fontSize: 11, color: C.fg3, marginTop: 4 }}>
+              Sprint #{p.sprint}
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <StatusBadge status={p.status} />
             <div ref={menuRef} style={{ position: 'relative' }}>
               <button
                 type="button"
@@ -192,7 +173,7 @@ function ProjectCard({ project: p, onRename, onToggleStatus, onInlineUpdate }) {
                   height: 28,
                   borderRadius: 6,
                   border: `1px solid ${C.borderSubtle}`,
-                  background: menuOpen ? C.subtle : C.white,
+                  background: menuOpen ? C.subtle : completedSection ? '#e4e7eb' : C.white,
                   display: 'inline-flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -210,7 +191,7 @@ function ProjectCard({ project: p, onRename, onToggleStatus, onInlineUpdate }) {
                     position: 'absolute',
                     top: 32,
                     right: 0,
-                    minWidth: 140,
+                    minWidth: 168,
                     background: C.white,
                     border: `1px solid ${C.borderSubtle}`,
                     borderRadius: 8,
@@ -219,50 +200,51 @@ function ProjectCard({ project: p, onRename, onToggleStatus, onInlineUpdate }) {
                     zIndex: 20,
                   }}
                 >
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMenuOpen(false);
-                      onRename(p);
-                    }}
-                    style={{
-                      width: '100%',
-                      border: 'none',
-                      background: 'transparent',
-                      textAlign: 'left',
-                      borderRadius: 6,
-                      padding: '7px 8px',
-                      fontSize: 12.5,
-                      color: C.fg1,
-                      cursor: 'pointer',
-                      fontFamily: 'inherit',
-                    }}
-                  >
-                    {lang === 'ko' ? '프로젝트 이름 수정' : 'Rename project'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMenuOpen(false);
-                      onToggleStatus(p);
-                    }}
-                    style={{
-                      width: '100%',
-                      border: 'none',
-                      background: 'transparent',
-                      textAlign: 'left',
-                      borderRadius: 6,
-                      padding: '7px 8px',
-                      fontSize: 12.5,
-                      color: C.fg1,
-                      cursor: 'pointer',
-                      fontFamily: 'inherit',
-                    }}
-                  >
-                    {p.status === 'completed'
-                      ? lang === 'ko' ? '활성화하기' : 'Re-activate'
-                      : lang === 'ko' ? '완료하기' : 'Complete'}
-                  </button>
+                  {p.canManage ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMenuOpen(false);
+                          onEditSettings?.(p.id);
+                        }}
+                        style={MENU_ITEM_BTN}
+                      >
+                        {t('hubEditSettings')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMenuOpen(false);
+                          onToggleCompleted?.(p.id, p.is_completed);
+                        }}
+                        style={MENU_ITEM_BTN}
+                      >
+                        {p.is_completed ? t('hubMarkActive') : t('hubMarkCompleted')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMenuOpen(false);
+                          onDeleteProject?.(p.id);
+                        }}
+                        style={{ ...MENU_ITEM_BTN, color: C.coral }}
+                      >
+                        {t('hubDeleteProject')}
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        onViewOverview?.(p.id);
+                      }}
+                      style={MENU_ITEM_BTN}
+                    >
+                      {t('hubViewOverview')}
+                    </button>
+                  )}
                 </div>
               ) : null}
             </div>
@@ -287,16 +269,35 @@ function ProjectCard({ project: p, onRename, onToggleStatus, onInlineUpdate }) {
             <div style={{ fontSize: 10, color: C.fg3 }}>{t('consensus')}</div>
           </div>
           <div style={{ width: 1, background: C.border }} />
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', minWidth: 0 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, gap: 6 }}>
               <span style={{ fontSize: 10, color: C.fg3 }}>{t('progress')}</span>
-              <span style={{ fontSize: 10, fontWeight: 600, color: C.fg2 }}>{p.progress}%</span>
+              <span
+                style={{
+                  fontSize: 10,
+                  fontWeight: 600,
+                  color: C.fg2,
+                  textAlign: 'right',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  maxWidth: '58%',
+                }}
+              >
+                {calculatedProgress}%
+                {p.due_date ? (
+                  <span style={{ fontWeight: 500, color: progressStatusColor }}>
+                    {' '}
+                    · {formatTimelineStatusLabel(t, timelineMeta)}
+                  </span>
+                ) : null}
+              </span>
             </div>
             <div style={{ height: 4, background: C.muted, borderRadius: 2 }}>
               <div
                 style={{
                   height: 4, background: C.emerald, borderRadius: 2,
-                  width: `${p.progress}%`, transition: 'width 300ms',
+                  width: `${calculatedProgress}%`, transition: 'width 300ms',
                 }}
               />
             </div>
@@ -304,6 +305,7 @@ function ProjectCard({ project: p, onRename, onToggleStatus, onInlineUpdate }) {
         </div>
 
         <div
+          onClick={(e) => e.stopPropagation()}
           style={{
             fontSize: 11,
             color: C.fg3,
@@ -312,53 +314,10 @@ function ProjectCard({ project: p, onRename, onToggleStatus, onInlineUpdate }) {
             marginTop: -2,
           }}
         >
-          {editingDesc ? (
-            <input
-              value={descDraft}
-              onChange={(e) => setDescDraft(e.target.value)}
-              onBlur={commitDescEdit}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  commitDescEdit();
-                } else if (e.key === 'Escape') {
-                  setEditingDesc(false);
-                  setDescDraft(p.description || '');
-                }
-              }}
-              onClick={(e) => e.stopPropagation()}
-              autoFocus
-              placeholder={lang === 'ko' ? '설명을 입력하세요' : 'Add description'}
-              style={{
-                width: '100%',
-                fontSize: 11,
-                color: C.fg2,
-                border: `1px solid ${C.border}`,
-                borderRadius: 4,
-                padding: '3px 7px',
-                fontFamily: 'inherit',
-              }}
-            />
-          ) : (
-            <span
-              onClick={(e) => {
-                e.stopPropagation();
-                setEditingDesc(true);
-              }}
-              title={lang === 'ko' ? '클릭하여 설명 수정' : 'Click to edit description'}
-            >
-              {p.description || (lang === 'ko' ? '설명을 추가하세요' : 'Add description')}
-            </span>
-          )}
+          {p.description || '—'}
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-            <div style={{ width: 6, height: 6, borderRadius: '50%', background: riskColor[p.risk] }} />
-            <span style={{ fontSize: 10, color: C.fg3 }}>
-              {riskLabel[p.risk]} {t('risk')}
-            </span>
-          </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
           <span style={{ fontSize: 10, color: C.fg4 }}>
             {t('updated')} {p.updated}
           </span>
@@ -368,16 +327,25 @@ function ProjectCard({ project: p, onRename, onToggleStatus, onInlineUpdate }) {
   );
 }
 
-function ProjectGrid({ projects, onRename, onToggleStatus, onInlineUpdate }) {
+function ProjectGrid({
+  projects,
+  onEditSettings,
+  onViewOverview,
+  onToggleCompleted,
+  onDeleteProject,
+  completedSection,
+}) {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12 }}>
       {projects.map((p) => (
         <ProjectCard
           key={p.id}
           project={p}
-          onRename={onRename}
-          onToggleStatus={onToggleStatus}
-          onInlineUpdate={onInlineUpdate}
+          onEditSettings={onEditSettings}
+          onViewOverview={onViewOverview}
+          onToggleCompleted={onToggleCompleted}
+          onDeleteProject={onDeleteProject}
+          completedSection={completedSection}
         />
       ))}
     </div>
@@ -390,23 +358,20 @@ export default function HubPage({ user }) {
   const [rows, setRows] = useState([]);
   const [loadState, setLoadState] = useState({ status: 'loading' }); // loading | success | error
   const [createOpen, setCreateOpen] = useState(false);
-  const [saveState, setSaveState] = useState({ status: 'idle' }); // idle | saving | error
   const [notice, setNotice] = useState('');
-  const [renameOpen, setRenameOpen] = useState(false);
-  const [renameForm, setRenameForm] = useState({ id: '', name: '' });
-  const [renameState, setRenameState] = useState({ status: 'idle' }); // idle | saving | error
-  const [form, setForm] = useState({
-    name: '',
-    status: 'Active',
-    progress: 0,
-  });
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [selectedProject, setSelectedProject] = useState(null);
+  const [overviewModalOpen, setOverviewModalOpen] = useState(false);
+  const [overviewProjectRow, setOverviewProjectRow] = useState(null);
 
   async function fetchProjects(signal) {
     if (!user?.id) return;
     setLoadState({ status: 'loading' });
     const ownedQuery = supabase
       .from('projects')
-      .select('id, name, status, progress, description, sprint_number, created_at')
+      .select(
+        'id, user_id, name, progress, is_completed, description, description_short, description_detail, north_star, sprint_number, created_at, start_date, due_date, priority_aesthetics_functionality, priority_cost_quality, priority_speed_stability',
+      )
       .eq('user_id', user.id)
       .order('created_at', { ascending: false });
 
@@ -438,7 +403,9 @@ export default function HubPage({ user }) {
         if (invitedIds.length) {
           const invitedProjectsQuery = supabase
             .from('projects')
-            .select('id, name, status, progress, description, sprint_number, created_at')
+            .select(
+              'id, user_id, name, progress, is_completed, description, description_short, description_detail, north_star, sprint_number, created_at, start_date, due_date, priority_aesthetics_functionality, priority_cost_quality, priority_speed_stability',
+            )
             .in('id', invitedIds)
             .order('created_at', { ascending: false });
           const { data: invitedRows, error: invitedProjectsError } = signal
@@ -493,26 +460,128 @@ export default function HubPage({ user }) {
     return () => clearTimeout(timer);
   }, [notice]);
 
-  const { activeList, doneList } = useMemo(() => {
-    if (!rows.length) return { activeList: [], doneList: [] };
-    const act = [];
-    const done = [];
-    for (const row of rows) {
-      const card = mapRowToProject(row, lang);
-      if ((row.status || '').toLowerCase() === 'completed') done.push(card);
-      else act.push(card);
-    }
-    return { activeList: act, doneList: done };
-  }, [rows, lang]);
+  const activeProjectList = useMemo(() => {
+    const activeRows = rows.filter((row) => !row.is_completed);
+    return activeRows.map((row) => mapRowToProject(row, lang, user?.id));
+  }, [rows, lang, user?.id]);
+
+  const completedProjectList = useMemo(() => {
+    const doneRows = rows.filter((row) => row.is_completed);
+    return doneRows.map((row) => mapRowToProject(row, lang, user?.id));
+  }, [rows, lang, user?.id]);
 
   const stats = [
-    { label: t('kpiActiveProjects'), value: loadState.status === 'success' ? String(activeList.length) : '—',   sub: t('kpiActiveProjectsSub'), color: C.fg1 },
+    {
+      label: t('kpiActiveProjects'),
+      value: loadState.status === 'success' ? String(activeProjectList.length) : '—',
+      sub: t('kpiActiveProjectsSub'),
+      color: C.fg1,
+    },
     { label: t('kpiOpenConflicts'),  value: '7',   sub: t('kpiOpenConflictsSub'),  color: C.coral },
     { label: t('kpiConsensus'),      value: '78%', sub: t('kpiConsensusSub'),      color: C.emerald },
     { label: t('kpiSprints'),        value: '52',  sub: t('kpiSprintsSub'),        color: C.fg1 },
   ];
 
-  function projectGridOrMessage(list) {
+  async function toggleCompleted(projectId, currentValue) {
+    if (!user?.id) return;
+    const next = !currentValue;
+    const prevRows = rows;
+    setRows((prev) =>
+      prev.map((row) => (row.id === projectId ? { ...row, is_completed: next } : row)),
+    );
+    const { error } = await supabase
+      .from('projects')
+      .update({ is_completed: next })
+      .eq('id', projectId)
+      .eq('user_id', user.id);
+    if (error) {
+      // eslint-disable-next-line no-console
+      console.error('[hub/projects] toggle completed failed:', error);
+      setRows(prevRows);
+      setNotice(t('hubToggleCompletedFailed'));
+      return;
+    }
+    setNotice(lang === 'ko' ? '프로젝트 상태가 업데이트되었습니다.' : 'Project status updated.');
+  }
+
+  async function deleteProject(projectId) {
+    if (!user?.id) return;
+    // eslint-disable-next-line no-alert
+    if (!window.confirm(t('hubDeleteConfirm'))) return;
+    const prevRows = rows;
+    setRows((prev) => prev.filter((row) => row.id !== projectId));
+    const { error } = await supabase.from('projects').delete().eq('id', projectId).eq('user_id', user.id);
+    if (error) {
+      // eslint-disable-next-line no-console
+      console.error('[hub/projects] delete failed:', error);
+      setRows(prevRows);
+      setNotice(t('hubDeleteFailed'));
+      return;
+    }
+    setNotice(lang === 'ko' ? '프로젝트가 삭제되었습니다.' : 'Project deleted.');
+  }
+
+  async function handleProjectUpdate(projectId, updates) {
+    if (!user?.id) return false;
+    const start = updates.startDate?.trim() || null;
+    const due = updates.dueDate?.trim() || null;
+    const nextProgress = start && due ? calculateDateProgress(start, due) : 0;
+    const { error } = await supabase
+      .from('projects')
+      .update({
+        name: updates.name,
+        description_short: updates.descriptionShort,
+        description: updates.descriptionShort,
+        description_detail: updates.descriptionDetail || null,
+        north_star: updates.northStar,
+        priority_aesthetics_functionality: updates.priorityAestheticsFunctionality,
+        priority_cost_quality: updates.priorityCostQuality,
+        priority_speed_stability: updates.prioritySpeedStability,
+        start_date: start,
+        due_date: due,
+        progress: nextProgress,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', projectId)
+      .eq('user_id', user.id);
+    if (error) {
+      // eslint-disable-next-line no-console
+      console.error('[hub/projects] update settings failed:', error);
+      return false;
+    }
+    await fetchProjects();
+    setNotice(t('editProjectUpdated'));
+    return true;
+  }
+
+  function openEditProject(projectId) {
+    const row = rows.find((r) => r.id === projectId);
+    if (row) {
+      setSelectedProject(row);
+      setEditModalOpen(true);
+    }
+  }
+
+  function closeEditModal() {
+    setEditModalOpen(false);
+    setSelectedProject(null);
+  }
+
+  function openProjectOverview(projectId) {
+    const row = rows.find((r) => r.id === projectId);
+    if (row) {
+      setOverviewProjectRow(row);
+      setOverviewModalOpen(true);
+    }
+  }
+
+  function closeOverviewModal() {
+    setOverviewModalOpen(false);
+    setOverviewProjectRow(null);
+  }
+
+  function projectGridOrMessage(list, options = {}) {
+    const { emptyMessage, completedSection } = options;
     if (loadState.status === 'loading') {
       return (
         <div style={{ fontSize: 13, color: C.fg3, padding: '8px 0' }}>
@@ -530,174 +599,28 @@ export default function HubPage({ user }) {
     if (list.length === 0) {
       return (
         <div style={{ fontSize: 13, color: C.fg3, padding: '8px 0' }}>
-          {t('hubNoProjects')}
+          {emptyMessage ?? t('hubNoProjects')}
         </div>
       );
     }
     return (
       <ProjectGrid
         projects={list}
-        onRename={openRenameModal}
-        onToggleStatus={onToggleProjectStatus}
-        onInlineUpdate={onInlineProjectUpdate}
+        onEditSettings={openEditProject}
+        onViewOverview={openProjectOverview}
+        onToggleCompleted={toggleCompleted}
+        onDeleteProject={deleteProject}
+        completedSection={completedSection}
       />
     );
   }
 
   function openCreateModal() {
-    setSaveState({ status: 'idle' });
-    setForm({ name: '', status: 'Active', progress: 0 });
     setCreateOpen(true);
   }
 
   function closeCreateModal() {
-    if (saveState.status === 'saving') return;
     setCreateOpen(false);
-    setSaveState({ status: 'idle' });
-  }
-
-  async function onCreateProject(e) {
-    e.preventDefault();
-    if (saveState.status === 'saving') return;
-    const name = form.name.trim();
-    const progress = Math.min(100, Math.max(0, Number(form.progress) || 0));
-
-    if (!name) {
-      setSaveState({ status: 'error', message: t('hubCreateNameRequired') });
-      return;
-    }
-
-    setSaveState({ status: 'saving' });
-    const { error } = await supabase.from('projects').insert({
-      name,
-      status: form.status,
-      progress,
-      user_id: user?.id,
-    });
-
-    if (error) {
-      // eslint-disable-next-line no-console
-      console.error('[hub/projects] insert failed:', error);
-      setSaveState({ status: 'error', message: t('hubCreateError') });
-      return;
-    }
-
-    setCreateOpen(false);
-    setSaveState({ status: 'idle' });
-    await fetchProjects();
-    setNotice(t('hubCreateSuccess'));
-  }
-
-  function openRenameModal(project) {
-    setRenameForm({ id: project.id, name: project.name || '' });
-    setRenameState({ status: 'idle' });
-    setRenameOpen(true);
-  }
-
-  function closeRenameModal() {
-    if (renameState.status === 'saving') return;
-    setRenameOpen(false);
-    setRenameState({ status: 'idle' });
-  }
-
-  async function onRenameProject(e) {
-    e.preventDefault();
-    if (renameState.status === 'saving') return;
-    const name = renameForm.name.trim();
-    if (!name) {
-      setRenameState({
-        status: 'error',
-        message: lang === 'ko' ? '프로젝트 이름을 입력해 주세요.' : 'Project name is required.',
-      });
-      return;
-    }
-
-    const prevRows = rows;
-    setRenameState({ status: 'saving' });
-    setRows((prev) => prev.map((row) => (row.id === renameForm.id ? { ...row, name } : row)));
-
-    const { error } = await supabase
-      .from('projects')
-      .update({ name })
-      .eq('id', renameForm.id)
-      .eq('user_id', user?.id);
-
-    if (error) {
-      // eslint-disable-next-line no-console
-      console.error('[hub/projects] rename failed:', error);
-      setRows(prevRows);
-      setRenameState({
-        status: 'error',
-        message: lang === 'ko' ? '이름 수정에 실패했습니다. 다시 시도해 주세요.' : 'Failed to rename project.',
-      });
-      return;
-    }
-
-    setRenameOpen(false);
-    setRenameState({ status: 'idle' });
-    setNotice(lang === 'ko' ? '프로젝트 이름이 업데이트되었습니다.' : 'Project name updated.');
-  }
-
-  async function onToggleProjectStatus(project) {
-    const prevRows = rows;
-    const nextStatus = project.status === 'completed' ? 'active' : 'completed';
-    const uiStatus = nextStatus;
-    const wasCompleted = project.status === 'completed';
-
-    // Immediate UI move between Active / Completed sections.
-    setRows((prev) =>
-      prev.map((row) => (row.id === project.id ? { ...row, status: nextStatus } : row))
-    );
-    setNotice(
-      wasCompleted
-        ? lang === 'ko' ? '프로젝트를 활성 상태로 변경했습니다.' : 'Project re-activated.'
-        : lang === 'ko' ? '프로젝트를 완료 처리했습니다.' : 'Project completed.'
-    );
-
-    const { error } = await supabase
-      .from('projects')
-      .update({ status: nextStatus })
-      .eq('id', project.id)
-      .eq('user_id', user?.id);
-
-    if (error) {
-      // eslint-disable-next-line no-console
-      console.error('[hub/projects] status update failed:', error);
-      setRows(prevRows);
-      setNotice(
-        lang === 'ko'
-          ? '상태 변경에 실패했습니다. 다시 시도해 주세요.'
-          : 'Failed to change status. Please try again.'
-      );
-      return;
-    }
-
-    // Ensure UI is synced with latest DB state after successful mutation.
-    await fetchProjects();
-  }
-
-  async function onInlineProjectUpdate(projectId, patch) {
-    const normalizedPatch = {
-      ...patch,
-      ...(typeof patch.status === 'string'
-        ? { status: patch.status.toLowerCase() }
-        : {}),
-    };
-    const prevRows = rows;
-    setRows((prev) => prev.map((row) => (row.id === projectId ? { ...row, ...normalizedPatch } : row)));
-    const { error } = await supabase
-      .from('projects')
-      .update(normalizedPatch)
-      .eq('id', projectId)
-      .eq('user_id', user?.id);
-    if (error) {
-      // eslint-disable-next-line no-console
-      console.error('[hub/projects] inline update failed:', error);
-      setRows(prevRows);
-      setNotice(lang === 'ko' ? '프로젝트 업데이트에 실패했습니다.' : 'Failed to update project.');
-      return;
-    }
-    setNotice(lang === 'ko' ? '프로젝트가 업데이트되었습니다.' : 'Project updated.');
   }
 
   return (
@@ -764,199 +687,50 @@ export default function HubPage({ user }) {
             </Btn>
           }
         >
-          {projectGridOrMessage(activeList)}
+          {projectGridOrMessage(activeProjectList)}
         </CollapsibleSection>
 
-        <CollapsibleSection title={t('completedProjects')} defaultOpen={false}>
-          {loadState.status === 'loading' || loadState.status === 'error' ? null : projectGridOrMessage(doneList)}
-        </CollapsibleSection>
+        <div
+          style={{
+            marginTop: 8,
+            background: '#e8eaee',
+            border: `1px solid ${C.borderSubtle}`,
+            borderRadius: 8,
+            padding: '12px 14px 14px',
+          }}
+        >
+          <CollapsibleSection title={t('completedProjects')} defaultOpen={false}>
+            {projectGridOrMessage(completedProjectList, {
+              emptyMessage: t('hubNoCompletedProjects'),
+              completedSection: true,
+            })}
+          </CollapsibleSection>
+        </div>
       </div>
 
-      {createOpen ? (
-        <div
-          role="presentation"
-          onClick={closeCreateModal}
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(19,28,36,0.42)',
-            zIndex: 60,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 16,
-          }}
-        >
-          <form
-            onSubmit={onCreateProject}
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              width: '100%',
-              maxWidth: 460,
-              background: C.white,
-              border: `1px solid ${C.borderSubtle}`,
-              borderRadius: 8,
-              boxShadow: '0 20px 48px rgba(19,28,36,0.26)',
-              padding: 16,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 12,
-            }}
-          >
-            <div style={{ fontSize: 16, fontWeight: 700, color: C.fg1 }}>
-              {t('newProject')}
-            </div>
+      <NewProjectModal
+        open={createOpen}
+        variant="modal"
+        userId={user?.id}
+        onClose={closeCreateModal}
+        onCreated={async () => {
+          await fetchProjects();
+          setNotice(t('hubCreateSuccess'));
+        }}
+      />
 
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <span style={{ fontSize: 12, color: C.fg2 }}>{t('hubCreateNameLabel')}</span>
-              <input
-                type="text"
-                value={form.name}
-                onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
-                placeholder={t('hubCreateNamePlaceholder')}
-                disabled={saveState.status === 'saving'}
-                style={{
-                  border: `1px solid ${C.border}`,
-                  borderRadius: 4,
-                  height: 36,
-                  padding: '0 10px',
-                  fontSize: 13,
-                  color: C.fg1,
-                }}
-              />
-            </label>
+      <EditProjectModal
+        open={editModalOpen}
+        onClose={closeEditModal}
+        project={selectedProject}
+        onSave={handleProjectUpdate}
+      />
 
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <span style={{ fontSize: 12, color: C.fg2 }}>{t('hubCreateStatusLabel')}</span>
-              <select
-                value={form.status}
-                onChange={(e) => setForm((prev) => ({ ...prev, status: e.target.value }))}
-                disabled={saveState.status === 'saving'}
-                style={{
-                  border: `1px solid ${C.border}`,
-                  borderRadius: 4,
-                  height: 36,
-                  padding: '0 10px',
-                  fontSize: 13,
-                  color: C.fg1,
-                  background: C.white,
-                }}
-              >
-                <option value="Active">Active</option>
-                <option value="Pending">Pending</option>
-              </select>
-            </label>
-
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <span style={{ fontSize: 12, color: C.fg2 }}>{t('hubCreateProgressLabel')}</span>
-              <input
-                type="number"
-                min={0}
-                max={100}
-                step={1}
-                value={form.progress}
-                onChange={(e) => setForm((prev) => ({ ...prev, progress: e.target.value }))}
-                disabled={saveState.status === 'saving'}
-                style={{
-                  border: `1px solid ${C.border}`,
-                  borderRadius: 4,
-                  height: 36,
-                  padding: '0 10px',
-                  fontSize: 13,
-                  color: C.fg1,
-                }}
-              />
-            </label>
-
-            {saveState.status === 'error' ? (
-              <div style={{ fontSize: 12, color: C.coral }}>{saveState.message}</div>
-            ) : null}
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
-              <Btn variant="default" size="sm" onClick={closeCreateModal} disabled={saveState.status === 'saving'}>
-                {t('hubCreateCancel')}
-              </Btn>
-              <Btn type="submit" variant="primary" size="sm" disabled={saveState.status === 'saving'}>
-                {saveState.status === 'saving' ? t('hubCreateSaving') : t('hubCreateSave')}
-              </Btn>
-            </div>
-          </form>
-        </div>
-      ) : null}
-
-      {renameOpen ? (
-        <div
-          role="presentation"
-          onClick={closeRenameModal}
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(19,28,36,0.42)',
-            zIndex: 70,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 16,
-          }}
-        >
-          <form
-            onSubmit={onRenameProject}
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              width: '100%',
-              maxWidth: 420,
-              background: C.white,
-              border: `1px solid ${C.borderSubtle}`,
-              borderRadius: 8,
-              boxShadow: '0 20px 48px rgba(19,28,36,0.26)',
-              padding: 16,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 12,
-            }}
-          >
-            <div style={{ fontSize: 16, fontWeight: 700, color: C.fg1 }}>
-              {lang === 'ko' ? '프로젝트 이름 수정' : 'Rename project'}
-            </div>
-
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <span style={{ fontSize: 12, color: C.fg2 }}>
-                {lang === 'ko' ? '새 프로젝트 이름' : 'New project name'}
-              </span>
-              <input
-                type="text"
-                value={renameForm.name}
-                onChange={(e) => setRenameForm((prev) => ({ ...prev, name: e.target.value }))}
-                disabled={renameState.status === 'saving'}
-                autoFocus
-                style={{
-                  border: `1px solid ${C.border}`,
-                  borderRadius: 4,
-                  height: 36,
-                  padding: '0 10px',
-                  fontSize: 13,
-                  color: C.fg1,
-                }}
-              />
-            </label>
-
-            {renameState.status === 'error' ? (
-              <div style={{ fontSize: 12, color: C.coral }}>{renameState.message}</div>
-            ) : null}
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
-              <Btn variant="default" size="sm" onClick={closeRenameModal} disabled={renameState.status === 'saving'}>
-                {lang === 'ko' ? '취소' : 'Cancel'}
-              </Btn>
-              <Btn type="submit" variant="primary" size="sm" disabled={renameState.status === 'saving'}>
-                {renameState.status === 'saving'
-                  ? lang === 'ko' ? '저장 중...' : 'Saving...'
-                  : lang === 'ko' ? '저장' : 'Save'}
-              </Btn>
-            </div>
-          </form>
-        </div>
-      ) : null}
+      <ProjectOverviewModal
+        open={overviewModalOpen}
+        onClose={closeOverviewModal}
+        project={overviewProjectRow}
+      />
     </>
   );
 }

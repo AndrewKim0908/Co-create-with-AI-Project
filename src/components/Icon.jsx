@@ -5,7 +5,8 @@ import {
   MessageSquare, Send, Loader, CheckCircle, XCircle, FileText,
   Download, ZoomIn, ZoomOut, Maximize2, Layers, Eye, EyeOff, Mail, Lock, House, MoreVertical, Upload,   Hand,
   Pencil,
-  Thermometer, Palette, Shield, ClipboardCheck, Package, Hammer, Search, Briefcase,
+  Thermometer, Palette, Shield, ClipboardCheck, Package, Hammer, Search, Briefcase, Calendar,
+  Info, Globe,
 } from 'lucide-react';
 
 const MAP = {
@@ -35,6 +36,9 @@ const MAP = {
   hammer: Hammer,
   search: Search,
   briefcase: Briefcase,
+  calendar: Calendar,
+  info: Info,
+  globe: Globe,
   'arrow-right': ArrowRight,
   check: Check,
   x: X,

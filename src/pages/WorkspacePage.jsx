@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import Header from '@/components/Header';
 import Icon from '@/components/Icon';
+import LanguageDropdown from '@/components/LanguageDropdown';
+import ProjectOverviewModal from '@/components/ProjectOverviewModal';
 import { C } from '@/constants/colors';
 import { getProjectById, DEFAULT_PROJECT } from '@/constants/projects';
 import {
@@ -12,6 +14,9 @@ import {
 } from '@/constants/realtime';
 import { useLang } from '@/i18n/LangContext';
 import { supabase } from '@/lib/supabase';
+import { projectShortDescription } from '@/utils/projectDisplay';
+import { mockAIAnalysisResult, mockInsufficientChat } from '@/utils/mockAIAnalysis';
+import { requestGeminiAnalysis } from '@/utils/geminiApi';
 import {
   getUserColor,
   isEditableKeyboardTarget,
@@ -1735,30 +1740,90 @@ function ChatPanel({ projectId, senderRole = 'engineer', width = 220 }) {
 }
 
 // ─── Radar chart ─────────────────────────────────────────────
-function RadarChart() {
+function hexToRgba(hex, alpha) {
+  const h = String(hex || '').replace('#', '');
+  if (h.length !== 6 && h.length !== 3) return `rgba(62,120,170,${alpha})`;
+  const full = h.length === 3 ? h.split('').map((c) => c + c).join('') : h;
+  const bigint = parseInt(full, 16);
+  const r = (bigint >> 16) & 255;
+  const g = (bigint >> 8) & 255;
+  const b = bigint & 255;
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+function RadarChart({ axes: axesProp, datasets: datasetsProp } = {}) {
   const { t } = useLang();
-  const axes = [
-    t('radarCost'), t('radarPerf'), t('radarDura'),
-    t('radarMfg'),  t('radarTime'), t('radarSafe'),
+  const fallbackAxes = [
+    t('radarCost'),
+    t('radarPerf'),
+    t('radarDura'),
+    t('radarMfg'),
+    t('radarTime'),
+    t('radarSafe'),
   ];
+  const axes = axesProp?.length ? axesProp : fallbackAxes;
   const n = axes.length;
   const cx = 90;
   const cy = 90;
-  const r  = 65;
-  const engineer = [0.55, 0.85, 0.75, 0.95, 0.5,  0.8];
-  const designer = [0.7,  0.7,  0.95, 0.55, 0.4,  0.9];
-  const optionC  = [0.75, 0.82, 0.88, 0.85, 0.78, 0.87];
+  const r = 65;
+
+  const normalizeSeries = (vals) =>
+    (vals || []).map((v) => {
+      const x = Number(v);
+      if (!Number.isFinite(x)) return 0;
+      return x > 1 ? x / 100 : x;
+    });
+
+  const defaultDatasets = [
+    {
+      label: 'Engineer',
+      values: normalizeSeries([55, 85, 75, 95, 50, 80]),
+      color: '#3A6EA5',
+      lineStyle: 'dashed',
+    },
+    {
+      label: 'Designer',
+      values: normalizeSeries([70, 70, 95, 55, 40, 90]),
+      color: '#D05045',
+      lineStyle: 'dashed',
+    },
+    {
+      label: 'Option C',
+      values: normalizeSeries([75, 82, 88, 85, 78, 87]),
+      color: '#1E8A5A',
+      lineStyle: 'solid',
+    },
+  ];
+
+  const datasets =
+    datasetsProp?.length > 0
+      ? datasetsProp.map((d) => ({
+          ...d,
+          values: normalizeSeries(d.values),
+        }))
+      : defaultDatasets;
 
   const pt = (val, i) => {
     const a = (Math.PI * 2 * i) / n - Math.PI / 2;
     return { x: cx + r * val * Math.cos(a), y: cy + r * val * Math.sin(a) };
   };
-  const pts = (vals) =>
-    vals.map((v, i) => pt(v, i)).map((p) => `${p.x},${p.y}`).join(' ');
+  const pts = (vals) => {
+    const filled = vals.length >= n ? vals.slice(0, n) : [...vals, ...Array(n - vals.length).fill(0)];
+    return filled.map((v, i) => pt(v, i)).map((p) => `${p.x},${p.y}`).join(' ');
+  };
   const axisEnd = (i) => pt(1.08, i);
 
+  const drawOrder = datasets.slice().sort((a, b) => {
+    const rank = (x) => (x.lineStyle === 'solid' ? 1 : 0);
+    return rank(a) - rank(b);
+  });
+
+  const legendRows = Math.max(datasets.length, 1);
+  const legendH = legendRows * 10 + 8;
+  const svgH = 162 + legendH;
+
   return (
-    <svg width="180" height="180" viewBox="0 0 180 180">
+    <svg width="180" height={svgH} viewBox={`0 0 180 ${svgH}`}>
       {[0.25, 0.5, 0.75, 1].map((lvl) => (
         <polygon
           key={lvl}
@@ -1771,7 +1836,7 @@ function RadarChart() {
       {axes.map((ax, i) => {
         const end = axisEnd(i);
         return (
-          <g key={ax}>
+          <g key={`${String(ax)}-${i}`}>
             <line x1={cx} y1={cy} x2={end.x} y2={end.y} stroke="#C5D0D9" strokeWidth="0.8" />
             <text
               x={end.x + (end.x - cx) * 0.12}
@@ -1784,15 +1849,18 @@ function RadarChart() {
           </g>
         );
       })}
-      <polygon points={pts(engineer)} fill="rgba(62,106,165,0.10)" stroke="#3A6EA5" strokeWidth="1.5" strokeDasharray="3,2" />
-      <polygon points={pts(designer)} fill="rgba(208,80,69,0.08)"  stroke="#D05045" strokeWidth="1.5" strokeDasharray="3,2" />
-      <polygon points={pts(optionC)}  fill="rgba(30,138,90,0.12)"  stroke="#1E8A5A" strokeWidth="2" />
-      {[
-        { color: '#3A6EA5', label: 'Engineer' },
-        { color: C.coral,   label: 'Designer' },
-        { color: C.emerald, label: 'Option C' },
-      ].map((l, i) => (
-        <g key={l.label} transform={`translate(4,${155 + i * 9})`}>
+      {drawOrder.map((ds) => (
+        <polygon
+          key={ds.label}
+          points={pts(ds.values)}
+          fill={hexToRgba(ds.color, 0.12)}
+          stroke={ds.color}
+          strokeWidth={ds.lineStyle === 'solid' ? 2 : 1.5}
+          strokeDasharray={ds.lineStyle === 'dashed' ? '3 2' : undefined}
+        />
+      ))}
+      {datasets.map((l, i) => (
+        <g key={`leg-${l.label}`} transform={`translate(4,${162 + i * 10})`}>
           <rect width="10" height="2" y="3" fill={l.color} rx="1" />
           <text x="14" y="8" style={{ fontSize: 8, fill: '#62788A', fontFamily: 'Inter,sans-serif' }}>
             {l.label}
@@ -1801,6 +1869,41 @@ function RadarChart() {
       ))}
     </svg>
   );
+}
+
+/** Loads chat rows for AI analysis (same table as ChatPanel; tolerant of missing columns). */
+async function fetchProjectChatMessagesForAI(projectId) {
+  if (!projectId) return [];
+  let q = supabase
+    .from('messages')
+    .select('id, content, sender_role, sender_name, sender_email, created_at, project_id')
+    .eq('project_id', projectId)
+    .order('created_at', { ascending: true })
+    .limit(200);
+  let { data, error } = await q;
+  if (error && /sender_name/i.test(error.message || '')) {
+    ({ data, error } = await supabase
+      .from('messages')
+      .select('id, content, sender_role, sender_email, created_at, project_id')
+      .eq('project_id', projectId)
+      .order('created_at', { ascending: true })
+      .limit(200));
+  }
+  if (error && /project_id/i.test(error.message || '')) {
+    ({ data, error } = await supabase
+      .from('messages')
+      .select('id, content, sender_role, sender_name, sender_email, created_at')
+      .order('created_at', { ascending: true })
+      .limit(200));
+  }
+  if (error) {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.warn('[fetchProjectChatMessagesForAI]', error.message);
+    }
+    return [];
+  }
+  return data || [];
 }
 
 // ─── Conflict panel ──────────────────────────────────────────
@@ -1814,11 +1917,16 @@ function ConflictPanel({
   onApprove,
   onReject,
   onReachConsensus,
+  geminiProject = null,
+  designImageUrls = [],
 }) {
-  const { t, lang } = useLang();
+  const { t } = useLang();
   const [appHov, setAppHov] = useState(false);
   const [conHov, setConHov] = useState(false);
-  const [aiUi, setAiUi] = useState('idle');
+  const [aiAnalysisLoading, setAiAnalysisLoading] = useState(false);
+  const [aiAnalysisResult, setAiAnalysisResult] = useState(null);
+  const [activeConflictExpanded, setActiveConflictExpanded] = useState(false);
+  const [expandedPositions, setExpandedPositions] = useState({});
   const [noteDraft, setNoteDraft] = useState('');
   const [memoLocked, setMemoLocked] = useState(false);
   const [savingMemo, setSavingMemo] = useState(false);
@@ -2128,11 +2236,6 @@ function ConflictPanel({
     conflictUnanimousNavToken = null;
   }, [projectId, sprintNumber]);
 
-  const positions = [
-    { who: lang === 'ko' ? '엔지니어' : lang === 'zh' ? '工程师' : 'Engineer', text: t('posEngineer'), icon: 'cpu',      color: C.emerald },
-    { who: lang === 'ko' ? '디자이너' : lang === 'zh' ? '设计师' : 'Designer', text: t('posDesigner'), icon: 'pen-tool', color: '#3A6EA5' },
-  ];
-
   useEffect(() => {
     const next = String(consensusNote ?? '');
     setNoteDraft(next);
@@ -2378,12 +2481,67 @@ function ConflictPanel({
     await castVote(VOTE_STATUS.OPPOSE);
   }
 
-  function handleRequestAiAnalysis() {
-    if (aiUi === 'loading') return;
-    setAiUi('loading');
-    window.setTimeout(() => {
-      setAiUi('done');
-    }, 1500);
+  async function handleRequestAIAnalysis() {
+    if (aiAnalysisLoading) return;
+    setAiAnalysisLoading(true);
+    setAiAnalysisResult(null);
+    try {
+      const chatRows = await fetchProjectChatMessagesForAI(projectId);
+      const chatMessages = chatRows.map((m) => ({
+        content: String(m.content ?? ''),
+        senderName: String(m.sender_name || m.sender_email || 'User'),
+        senderRole: String(m.sender_role || 'member'),
+      }));
+
+      const participantRows = await loadParticipants();
+      const participantsForAi = participantRows
+        .filter((p) => p.userId)
+        .map((p) => ({
+          userId: String(normalizeParticipantUserId(p.userId)),
+          name: String(p.label),
+          role: 'Member',
+        }))
+        .filter((p, i, arr) => arr.findIndex((x) => x.userId === p.userId) === i);
+
+      const gp = geminiProject || {};
+      const result = await requestGeminiAnalysis({
+        project: {
+          name: gp.name,
+          description_short: gp.description_short,
+          north_star: gp.north_star,
+          priority_aesthetics_functionality: gp.priority_aesthetics_functionality,
+          priority_cost_quality: gp.priority_cost_quality,
+          priority_speed_stability: gp.priority_speed_stability,
+        },
+        chatMessages,
+        participants: participantsForAi,
+        designImageUrls: Array.isArray(designImageUrls) ? designImageUrls : [],
+      });
+
+      setAiAnalysisResult(result);
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error('AI Analysis failed:', error);
+      setAiAnalysisResult({
+        canAnalyze: false,
+        reason: 'error',
+        message: `${t('aiAnalysisErrorPrefix')}${error?.message || String(error)}`,
+      });
+    } finally {
+      setAiAnalysisLoading(false);
+    }
+  }
+
+  function switchMockScenario(scenario) {
+    if (scenario === 'normal') setAiAnalysisResult(mockAIAnalysisResult);
+    if (scenario === 'insufficient') setAiAnalysisResult(mockInsufficientChat);
+  }
+
+  function togglePosition(userId) {
+    setExpandedPositions((prev) => ({
+      ...prev,
+      [userId]: !prev[userId],
+    }));
   }
 
   async function handleReachConsensusClick() {
@@ -2437,30 +2595,39 @@ function ConflictPanel({
           style={{
             flex: '66 1 0%',
             minHeight: 0,
-            overflow: 'auto',
             display: 'flex',
             flexDirection: 'column',
-            gap: 12,
-            padding: 12,
+            overflow: 'hidden',
             borderBottom: `1px solid ${C.borderSubtle}`,
           }}
         >
-          <div>
+          <div
+            style={{
+              flexShrink: 0,
+              position: 'sticky',
+              top: 0,
+              zIndex: 10,
+              background: C.white,
+              padding: 16,
+              borderBottom: `1px solid ${C.borderSubtle}`,
+              boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
+            }}
+          >
             <button
               type="button"
-              disabled={aiUi === 'loading'}
-              onClick={handleRequestAiAnalysis}
+              disabled={aiAnalysisLoading}
+              onClick={handleRequestAIAnalysis}
               style={{
                 width: '100%',
-                padding: '8px 10px',
-                borderRadius: 5,
+                padding: '12px',
+                borderRadius: 6,
                 fontSize: 11,
                 fontWeight: 600,
                 fontFamily: 'inherit',
                 border: `1px solid ${C.emeraldBorder}`,
-                background: aiUi === 'done' ? C.emeraldLight : C.white,
-                color: aiUi === 'done' ? C.emerald : C.fg2,
-                cursor: aiUi === 'loading' ? 'wait' : 'pointer',
+                background: aiAnalysisResult && !aiAnalysisLoading ? C.emeraldLight : C.white,
+                color: aiAnalysisResult && !aiAnalysisLoading ? C.emerald : C.fg2,
+                cursor: aiAnalysisLoading ? 'wait' : 'pointer',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -2468,322 +2635,775 @@ function ConflictPanel({
                 transition: 'background 160ms, color 160ms',
               }}
             >
-              {aiUi === 'loading' ? (
+              {aiAnalysisLoading ? (
                 <>
                   <span className="conflict-spin" style={{ display: 'inline-flex' }}>
                     <Icon name="loader" size={14} color={C.emerald} />
                   </span>
                   <span>{t('requestAiAnalysisBtn')}</span>
                 </>
-              ) : aiUi === 'done' ? (
+              ) : aiAnalysisResult ? (
                 <>
                   <Icon name="check-circle" size={14} color={C.emerald} />
                   <span>{t('aiAnalysisComplete')}</span>
                 </>
               ) : (
-                t('requestAiAnalysisBtn')
+                <>
+                  <Icon name="sparkles" size={16} color={C.emerald} />
+                  <span>{t('requestAiAnalysisBtn')}</span>
+                </>
               )}
             </button>
           </div>
 
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
-              <Icon name="alert-triangle" size={13} color={C.coral} />
-              <span style={{ fontSize: 11, fontWeight: 600, color: C.fg2 }}>{t('cfHeader')}</span>
-            </div>
-            <div style={{ fontSize: 12, fontWeight: 600, color: C.fg1 }}>{t('cfTitle')}</div>
-            <div style={{ fontSize: 10, color: C.fg3, marginTop: 2 }}>{t('cfMeta')}</div>
-          </div>
-
-          <div>
-            <div
-              style={{
-                fontSize: 10, fontWeight: 600, textTransform: 'uppercase',
-                letterSpacing: '0.08em', color: C.fg3, marginBottom: 8,
-              }}
-            >
-              {t('positions')}
-            </div>
-            {positions.map((p) => (
-              <div
-                key={p.who}
-                style={{
-                  display: 'flex', alignItems: 'flex-start', gap: 8,
-                  padding: '8px', borderRadius: 4,
-                  background: C.subtle, border: `1px solid ${C.borderSubtle}`,
-                  marginBottom: 6,
-                }}
-              >
-                <div
-                  style={{
-                    width: 20, height: 20, borderRadius: 3,
-                    background: `${p.color}15`,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    flexShrink: 0, marginTop: 1,
-                  }}
-                >
-                  <Icon name={p.icon} size={11} color={p.color} />
-                </div>
-                <div>
-                  <div style={{ fontSize: 10, fontWeight: 600, color: p.color, marginBottom: 1 }}>
-                    {p.who}
-                  </div>
-                  <div style={{ fontSize: 11, color: C.fg2 }}>{p.text}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div>
-            <div
-              style={{
-                fontSize: 10, fontWeight: 600, textTransform: 'uppercase',
-                letterSpacing: '0.08em', color: C.fg3, marginBottom: 4,
-              }}
-            >
-              {t('valueMatrix')}
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'center' }}>
-              <RadarChart />
-            </div>
-          </div>
-
           <div
             style={{
-              borderRadius: 6,
-              border: `2px solid ${C.emerald}`,
-              padding: '12px 12px 14px',
-              background: C.emeraldLight,
-              animation: 'option-glow 2.5s ease-in-out infinite',
-              overflow: 'hidden',
-              boxSizing: 'border-box',
-              width: '100%',
-              maxWidth: '100%',
-              minWidth: 0,
-              flexShrink: 0,
+              flex: 1,
+              minHeight: 0,
+              overflowY: 'auto',
               display: 'flex',
               flexDirection: 'column',
-              gap: 8,
+              gap: 12,
+              padding: 16,
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 0, minWidth: 0 }}>
-              <Icon name="sparkles" size={13} color={C.emerald} />
-              <span
-                style={{
-                  fontSize: 11,
-                  fontWeight: 700,
-                  color: C.emerald,
-                  minWidth: 0,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {t('optionCLabel')}
-              </span>
-              <span
-                style={{
-                  fontSize: 9, fontWeight: 600,
-                  padding: '1px 5px', borderRadius: 9999,
-                  background: C.emerald, color: '#fff', marginLeft: 'auto',
-                  flexShrink: 0,
-                }}
-              >
-                {t('optionCNew')}
-              </span>
-            </div>
-            <div style={{ fontSize: 12, fontWeight: 600, color: C.fg1 }}>
-              {t('optionCTitle')}
-            </div>
-            <div style={{ fontSize: 11, color: C.fg2, lineHeight: 1.55 }}>
-              {t('optionCDesc')}
-            </div>
-            <div style={{ display: 'flex', gap: 8, width: '100%', minWidth: 0 }}>
-              {[
-                { label: t('metaLeadTime'), value: '+3d',  good: false },
-                { label: t('metaRisk'),     value: '−72%', good: true },
-                { label: t('metaConf'),     value: '91%',  good: true },
-              ].map((m) => (
-                <div
-                  key={m.label}
-                  style={{
-                    flex: '1 1 0%',
-                    minWidth: 0,
-                    background: 'white', borderRadius: 4,
-                    padding: '5px 6px', textAlign: 'center',
-                    border: `1px solid ${C.emeraldBorder}`,
-                  }}
-                >
-                  <div style={{ fontSize: 12, fontWeight: 700, color: m.good ? C.emerald : C.amber }}>
-                    {m.value}
-                  </div>
-                  <div style={{ fontSize: 9, color: C.fg3 }}>{m.label}</div>
-                </div>
-              ))}
-            </div>
+          {aiAnalysisLoading ? (
             <div
               style={{
                 display: 'flex',
-                gap: 8,
-                width: '100%',
-                minWidth: 0,
-                flexShrink: 0,
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 10,
+                padding: '24px 12px',
+                textAlign: 'center',
               }}
             >
-              <button
-                type="button"
-                disabled={voteSaving || !sprintVoteKeyOk}
-                onMouseEnter={() => setAppHov(true)}
-                onMouseLeave={() => setAppHov(false)}
-                onClick={handleApproveVoteClick}
-                style={{
-                  flex: '1 1 0%',
-                  minWidth: 0,
-                  padding: '9px 8px',
-                  borderRadius: 5,
-                  fontSize: 12,
-                  fontWeight: 600,
-                  fontFamily: 'inherit',
-                  color: appHov ? '#fff' : C.emerald,
-                  background: appHov ? C.emeraldHover : 'transparent',
-                  border: `1px solid ${C.emerald}`,
-                  cursor: voteSaving || !sprintVoteKeyOk ? 'not-allowed' : 'pointer',
-                  opacity: voteSaving ? 0.75 : 1,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 6,
-                  boxShadow: 'none',
-                  transition: 'color 200ms ease, background-color 200ms ease, border-color 200ms ease',
-                  transform: appHov ? 'translateY(-1px)' : 'none',
-                }}
-              >
-                <Icon name="check" size={14} color={appHov ? '#fff' : C.emerald} />
-                {t('approveBtn')}
-              </button>
-              <button
-                type="button"
-                disabled={voteSaving || !sprintVoteKeyOk}
-                onMouseEnter={() => setOppHov(true)}
-                onMouseLeave={() => setOppHov(false)}
-                onClick={handleOpposeVoteClick}
-                style={{
-                  flex: '1 1 0%',
-                  minWidth: 0,
-                  padding: '9px 8px',
-                  borderRadius: 5,
-                  fontSize: 12,
-                  fontWeight: 600,
-                  fontFamily: 'inherit',
-                  color: oppHov ? '#fff' : C.coral,
-                  background: oppHov ? C.coralHover : 'transparent',
-                  border: `1px solid ${C.coral}`,
-                  cursor: voteSaving || !sprintVoteKeyOk ? 'not-allowed' : 'pointer',
-                  opacity: voteSaving ? 0.75 : 1,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 6,
-                  boxShadow: 'none',
-                  transition: 'color 200ms ease, background-color 200ms ease, border-color 200ms ease',
-                  transform: oppHov ? 'translateY(-1px)' : 'none',
-                }}
-              >
-                <Icon name="x" size={14} color={oppHov ? '#fff' : C.coral} />
-                {t('opposeBtn')}
-              </button>
+              <span className="conflict-spin" style={{ display: 'inline-flex' }}>
+                <Icon name="loader" size={24} color={C.emerald} />
+              </span>
+              <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: C.fg1 }}>
+                {t('aiAnalyzingTitle')}
+              </p>
+              <p style={{ margin: 0, fontSize: 11, color: C.fg3 }}>{t('aiAnalyzingLine')}</p>
             </div>
-            {showVoteWaitingOthers ? (
-              <div
-                style={{
-                  fontSize: 10,
-                  fontWeight: 600,
-                  color: C.fg2,
-                  textAlign: 'center',
-                  padding: '8px 6px',
-                  borderRadius: 4,
-                  background: 'rgba(255,255,255,0.75)',
-                  border: `1px solid ${C.emeraldBorder}`,
-                  lineHeight: 1.4,
-                }}
-              >
-                {t('voteWaitingOthers')}
-              </div>
-            ) : null}
+          ) : null}
+
+          {!aiAnalysisLoading && !aiAnalysisResult ? (
             <div
               style={{
-                paddingTop: 8,
-                marginTop: 2,
-                borderTop: `1px solid rgba(30,138,90,0.25)`,
-                minWidth: 0,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                textAlign: 'center',
+                gap: 8,
+                padding: '20px 8px',
               }}
             >
-              <div style={{ fontSize: 9, fontWeight: 700, color: C.fg3, marginBottom: 6 }}>
-                {t('voteParticipantsHeading')}
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {!participants.length ? (
-                  <div style={{ fontSize: 10, color: C.fg4 }}>—</div>
-                ) : (
-                  participants.map((p) => {
-                    let status = 'pending';
-                    if (p.userId) {
-                      const uidNorm = normalizeParticipantUserId(p.userId);
-                      const v = uidNorm ? voteMap[uidNorm] : undefined;
-                      if (v === VOTE_STATUS.APPROVE) status = VOTE_STATUS.APPROVE;
-                      else if (v === VOTE_STATUS.OPPOSE) status = VOTE_STATUS.OPPOSE;
-                      else status = 'pending';
-                    }
+              <Icon name="sparkles" size={48} color={C.border} />
+              <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: C.fg2 }}>
+                {t('aiAnalysisPlaceholderTitle')}
+              </h3>
+              <p style={{ margin: 0, fontSize: 11, color: C.fg3, lineHeight: 1.5 }}>
+                {t('aiAnalysisPlaceholderLine1')}
+                <br />
+                {t('aiAnalysisPlaceholderLine2')}
+              </p>
+            </div>
+          ) : null}
 
-                    return (
-                      <div
-                        key={p.key}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          gap: 10,
-                          minHeight: 20,
-                          minWidth: 0,
-                        }}
-                      >
-                        <span
-                          style={{
-                            flex: 1,
-                            fontSize: 11,
-                            color: C.fg2,
-                            overflow: 'hidden',
-                            whiteSpace: 'nowrap',
-                            textOverflow: 'ellipsis',
-                          }}
-                          title={p.label}
-                        >
-                          {p.label}
-                        </span>
-                        <span style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center' }}>
-                          {status === VOTE_STATUS.APPROVE ? (
-                            <Icon name="check" size={14} color={C.emerald} />
-                          ) : status === VOTE_STATUS.OPPOSE ? (
-                            <Icon name="x" size={14} color={C.coral} />
-                          ) : (
-                            <span
-                              style={{
-                                fontSize: 10,
-                                fontWeight: 600,
-                                letterSpacing: '0.02em',
-                                color: C.fg4,
-                              }}
-                            >
-                              {t('votePending')}
+          {!aiAnalysisLoading && aiAnalysisResult && !aiAnalysisResult.canAnalyze ? (
+            <div
+              style={{
+                borderRadius: 8,
+                border: `1px solid ${C.borderSubtle}`,
+                background: C.subtle,
+                padding: 14,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 10,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                <Icon
+                  name={aiAnalysisResult.reason === 'error' ? 'alert-triangle' : 'info'}
+                  size={20}
+                  color={aiAnalysisResult.reason === 'error' ? C.coral : '#3b82f6'}
+                />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <h3 style={{ margin: '0 0 8px', fontSize: 12, fontWeight: 600, color: C.fg1 }}>
+                    {aiAnalysisResult.message}
+                  </h3>
+                  {aiAnalysisResult.reason === 'insufficient_chat' && aiAnalysisResult.details ? (
+                    <ul style={{ margin: 0, paddingLeft: 18, fontSize: 11, color: C.fg2, lineHeight: 1.55 }}>
+                      {aiAnalysisResult.details.map((d) => (
+                        <li key={d.userName}>
+                          {d.userName}: {d.currentCount}/{d.required} {t('insufficientChatLabel')}
+                          {d.currentCount < d.required ? (
+                            <span style={{ color: C.coral }}>
+                              {' '}
+                              ({d.required - d.currentCount} {t('insufficientMoreNeeded')})
                             </span>
-                          )}
-                        </span>
-                      </div>
-                    );
-                  })
-                )}
+                          ) : null}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  {aiAnalysisResult.reason === 'need_more_context' && aiAnalysisResult.suggestedTopics ? (
+                    <ul style={{ margin: 0, paddingLeft: 18, fontSize: 11, color: C.fg2, lineHeight: 1.55 }}>
+                      {aiAnalysisResult.suggestedTopics.map((topic, i) => (
+                        <li key={i}>{topic}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
               </div>
             </div>
+          ) : null}
+
+          {!aiAnalysisLoading && aiAnalysisResult?.canAnalyze ? (
+            <>
+              <div>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    marginBottom: 8,
+                  }}
+                >
+                  <Icon name="alert-triangle" size={16} color={C.amber} />
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 600,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.08em',
+                      color: C.fg3,
+                    }}
+                  >
+                    {t('activeConflictSection')}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveConflictExpanded((v) => !v)}
+                  style={{
+                    width: '100%',
+                    textAlign: 'left',
+                    cursor: 'pointer',
+                    borderRadius: 6,
+                    border: `1px solid ${C.borderSubtle}`,
+                    background: C.white,
+                    padding: '10px 12px',
+                    fontFamily: 'inherit',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 10, fontWeight: 600, color: C.fg3, marginBottom: 4 }}>
+                        {aiAnalysisResult.activeConflict.id}
+                      </div>
+                      <h3
+                        style={{
+                          margin: '0 0 6px',
+                          fontSize: 13,
+                          fontWeight: 700,
+                          color: C.fg1,
+                        }}
+                      >
+                        {aiAnalysisResult.activeConflict.title}
+                      </h3>
+                      <p style={{ margin: 0, fontSize: 11, color: C.fg2, lineHeight: 1.45 }}>
+                        {aiAnalysisResult.activeConflict.summary}
+                      </p>
+                    </div>
+                    <Icon
+                      name={activeConflictExpanded ? 'chevron-up' : 'chevron-down'}
+                      size={20}
+                      color={C.fg3}
+                    />
+                  </div>
+                  {activeConflictExpanded ? (
+                    <div
+                      style={{
+                        marginTop: 10,
+                        paddingTop: 10,
+                        borderTop: `1px solid ${C.borderSubtle}`,
+                        fontSize: 11,
+                        color: C.fg2,
+                        lineHeight: 1.55,
+                      }}
+                    >
+                      {aiAnalysisResult.activeConflict.content}
+                    </div>
+                  ) : null}
+                </button>
+              </div>
+
+              <div>
+                <div
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 600,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.08em',
+                    color: C.fg3,
+                    marginBottom: 8,
+                  }}
+                >
+                  {t('positions')}
+                </div>
+                {aiAnalysisResult.positions.map((position) => (
+                  <button
+                    type="button"
+                    key={position.userId}
+                    onClick={() => togglePosition(position.userId)}
+                    style={{
+                      width: '100%',
+                      textAlign: 'left',
+                      cursor: 'pointer',
+                      borderRadius: 6,
+                      border: `1px solid ${C.borderSubtle}`,
+                      background: C.subtle,
+                      padding: '10px 10px',
+                      fontFamily: 'inherit',
+                      marginBottom: 8,
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                      <div
+                        style={{
+                          width: 28,
+                          height: 28,
+                          borderRadius: 9999,
+                          background: C.white,
+                          border: `1px solid ${C.borderSubtle}`,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: 11,
+                          fontWeight: 700,
+                          color: C.fg2,
+                          flexShrink: 0,
+                        }}
+                      >
+                        {position.userName.charAt(0)}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: C.fg1 }}>
+                          {position.userName}
+                          <span style={{ fontWeight: 500, color: C.fg3, marginLeft: 6 }}>
+                            ({position.role})
+                          </span>
+                        </div>
+                        <p
+                          style={{
+                            margin: '4px 0 0',
+                            fontSize: 11,
+                            color: C.fg2,
+                            lineHeight: 1.45,
+                          }}
+                        >
+                          {position.titleSummary}
+                        </p>
+                      </div>
+                      <Icon
+                        name={expandedPositions[position.userId] ? 'chevron-up' : 'chevron-down'}
+                        size={16}
+                        color={C.fg3}
+                      />
+                    </div>
+                    {expandedPositions[position.userId] ? (
+                      <div
+                        style={{
+                          marginTop: 10,
+                          paddingTop: 10,
+                          borderTop: `1px solid ${C.borderSubtle}`,
+                          fontSize: 11,
+                          color: C.fg2,
+                          lineHeight: 1.55,
+                        }}
+                      >
+                        {position.detailedPosition}
+                      </div>
+                    ) : null}
+                  </button>
+                ))}
+              </div>
+
+              <div>
+                <div
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 600,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.08em',
+                    color: C.fg3,
+                    marginBottom: 8,
+                  }}
+                >
+                  {t('valueMatrix')}
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'center' }}>
+                  <RadarChart
+                    axes={aiAnalysisResult.valueMatrix.axes}
+                    datasets={[
+                      {
+                        label: t('projectNorthStar'),
+                        values: aiAnalysisResult.valueMatrix.projectValues,
+                        color: C.fg1,
+                        lineStyle: 'solid',
+                      },
+                      ...aiAnalysisResult.valueMatrix.positionValues.map((pos) => ({
+                        label: pos.userName,
+                        values: pos.values,
+                        color: pos.color,
+                        lineStyle: 'dashed',
+                      })),
+                    ]}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    marginBottom: 8,
+                  }}
+                >
+                  <Icon name="sparkles" size={16} color={C.emerald} />
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 600,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.08em',
+                      color: C.fg3,
+                    }}
+                  >
+                    {t('optionCLabel')}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: 9,
+                      fontWeight: 600,
+                      padding: '2px 6px',
+                      borderRadius: 9999,
+                      background: C.emerald,
+                      color: '#fff',
+                    }}
+                  >
+                    AI
+                  </span>
+                </div>
+                <div
+                  style={{
+                    borderRadius: 8,
+                    border: `1px solid ${C.borderSubtle}`,
+                    background: C.white,
+                    padding: 12,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 10,
+                  }}
+                >
+                  <h3 style={{ margin: 0, fontSize: 13, fontWeight: 700, color: C.fg1 }}>
+                    {aiAnalysisResult.alternative.title}
+                  </h3>
+                  <p style={{ margin: 0, fontSize: 11, color: C.fg2, lineHeight: 1.55 }}>
+                    {aiAnalysisResult.alternative.description}
+                  </p>
+                  <div style={{ display: 'flex', gap: 8, width: '100%', minWidth: 0 }}>
+                    {[
+                      {
+                        label: t('metaLeadTime'),
+                        value: aiAnalysisResult.alternative.metrics.leadTime,
+                        highlight: false,
+                      },
+                      {
+                        label: t('metaRisk'),
+                        value: aiAnalysisResult.alternative.metrics.riskDelta,
+                        highlight: true,
+                      },
+                      {
+                        label: t('metaConf'),
+                        value: aiAnalysisResult.alternative.metrics.confidence,
+                        highlight: false,
+                      },
+                    ].map((m) => (
+                      <div
+                        key={m.label}
+                        style={{
+                          flex: '1 1 0%',
+                          minWidth: 0,
+                          background: C.subtle,
+                          borderRadius: 4,
+                          padding: '6px 6px',
+                          textAlign: 'center',
+                          border: `1px solid ${C.borderSubtle}`,
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontSize: 12,
+                            fontWeight: 700,
+                            color:
+                              m.highlight ? C.emerald : m.value.startsWith('+') ? C.amber : C.fg1,
+                          }}
+                        >
+                          {m.value}
+                        </div>
+                        <div style={{ fontSize: 9, color: C.fg3 }}>{m.label}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: '1fr 1fr',
+                      gap: 10,
+                      fontSize: 11,
+                      color: C.fg2,
+                    }}
+                  >
+                    <div>
+                      <h4
+                        style={{
+                          margin: '0 0 6px',
+                          fontSize: 10,
+                          fontWeight: 700,
+                          color: C.fg3,
+                          textTransform: 'uppercase',
+                        }}
+                      >
+                        {t('prosLabel')}
+                      </h4>
+                      <ul style={{ margin: 0, paddingLeft: 16, lineHeight: 1.45 }}>
+                        {aiAnalysisResult.alternative.pros.map((pro, i) => (
+                          <li key={i}>{pro}</li>
+                        ))}
+                      </ul>
+                    </div>
+                    <div>
+                      <h4
+                        style={{
+                          margin: '0 0 6px',
+                          fontSize: 10,
+                          fontWeight: 700,
+                          color: C.fg3,
+                          textTransform: 'uppercase',
+                        }}
+                      >
+                        {t('consLabel')}
+                      </h4>
+                      <ul style={{ margin: 0, paddingLeft: 16, lineHeight: 1.45 }}>
+                        {aiAnalysisResult.alternative.cons.map((con, i) => (
+                          <li key={i}>{con}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      borderRadius: 6,
+                      background: C.emeraldLight,
+                      border: `1px solid ${C.emeraldBorder}`,
+                      padding: 10,
+                      fontSize: 11,
+                      color: C.fg2,
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    <strong style={{ color: C.fg1 }}>{t('whyThisWorks')}</strong>
+                    <p style={{ margin: '6px 0 0' }}>{aiAnalysisResult.alternative.alignmentReason}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div
+                style={{
+                  borderRadius: 6,
+                  border: `2px solid ${C.emerald}`,
+                  padding: '12px 12px 14px',
+                  background: C.emeraldLight,
+                  animation: 'option-glow 2.5s ease-in-out infinite',
+                  overflow: 'hidden',
+                  boxSizing: 'border-box',
+                  width: '100%',
+                  maxWidth: '100%',
+                  minWidth: 0,
+                  flexShrink: 0,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 8,
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 0, minWidth: 0 }}>
+                  <Icon name="sparkles" size={13} color={C.emerald} />
+                  <span
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: C.emerald,
+                      minWidth: 0,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {t('optionCLabel')}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: 9,
+                      fontWeight: 600,
+                      padding: '1px 5px',
+                      borderRadius: 9999,
+                      background: C.emerald,
+                      color: '#fff',
+                      marginLeft: 'auto',
+                      flexShrink: 0,
+                    }}
+                  >
+                    {t('optionCNew')}
+                  </span>
+                </div>
+                <div style={{ fontSize: 11, fontWeight: 600, color: C.fg1, lineHeight: 1.4 }}>
+                  {aiAnalysisResult.alternative.title}
+                </div>
+                <div
+                  style={{
+                    display: 'flex',
+                    gap: 8,
+                    width: '100%',
+                    minWidth: 0,
+                    flexShrink: 0,
+                  }}
+                >
+                  <button
+                    type="button"
+                    disabled={voteSaving || !sprintVoteKeyOk}
+                    onMouseEnter={() => setAppHov(true)}
+                    onMouseLeave={() => setAppHov(false)}
+                    onClick={handleApproveVoteClick}
+                    style={{
+                      flex: '1 1 0%',
+                      minWidth: 0,
+                      padding: '9px 8px',
+                      borderRadius: 5,
+                      fontSize: 12,
+                      fontWeight: 600,
+                      fontFamily: 'inherit',
+                      color: appHov ? '#fff' : C.emerald,
+                      background: appHov ? C.emeraldHover : 'transparent',
+                      border: `1px solid ${C.emerald}`,
+                      cursor: voteSaving || !sprintVoteKeyOk ? 'not-allowed' : 'pointer',
+                      opacity: voteSaving ? 0.75 : 1,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 6,
+                      boxShadow: 'none',
+                      transition: 'color 200ms ease, background-color 200ms ease, border-color 200ms ease',
+                      transform: appHov ? 'translateY(-1px)' : 'none',
+                    }}
+                  >
+                    <Icon name="check" size={14} color={appHov ? '#fff' : C.emerald} />
+                    {t('approveBtn')}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={voteSaving || !sprintVoteKeyOk}
+                    onMouseEnter={() => setOppHov(true)}
+                    onMouseLeave={() => setOppHov(false)}
+                    onClick={handleOpposeVoteClick}
+                    style={{
+                      flex: '1 1 0%',
+                      minWidth: 0,
+                      padding: '9px 8px',
+                      borderRadius: 5,
+                      fontSize: 12,
+                      fontWeight: 600,
+                      fontFamily: 'inherit',
+                      color: oppHov ? '#fff' : C.coral,
+                      background: oppHov ? C.coralHover : 'transparent',
+                      border: `1px solid ${C.coral}`,
+                      cursor: voteSaving || !sprintVoteKeyOk ? 'not-allowed' : 'pointer',
+                      opacity: voteSaving ? 0.75 : 1,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 6,
+                      boxShadow: 'none',
+                      transition: 'color 200ms ease, background-color 200ms ease, border-color 200ms ease',
+                      transform: oppHov ? 'translateY(-1px)' : 'none',
+                    }}
+                  >
+                    <Icon name="x" size={14} color={oppHov ? '#fff' : C.coral} />
+                    {t('opposeBtn')}
+                  </button>
+                </div>
+                {showVoteWaitingOthers ? (
+                  <div
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 600,
+                      color: C.fg2,
+                      textAlign: 'center',
+                      padding: '8px 6px',
+                      borderRadius: 4,
+                      background: 'rgba(255,255,255,0.75)',
+                      border: `1px solid ${C.emeraldBorder}`,
+                      lineHeight: 1.4,
+                    }}
+                  >
+                    {t('voteWaitingOthers')}
+                  </div>
+                ) : null}
+                <div
+                  style={{
+                    paddingTop: 8,
+                    marginTop: 2,
+                    borderTop: `1px solid rgba(30,138,90,0.25)`,
+                    minWidth: 0,
+                  }}
+                >
+                  <div style={{ fontSize: 9, fontWeight: 700, color: C.fg3, marginBottom: 6 }}>
+                    {t('voteParticipantsHeading')}
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {!participants.length ? (
+                      <div style={{ fontSize: 10, color: C.fg4 }}>—</div>
+                    ) : (
+                      participants.map((p) => {
+                        let status = 'pending';
+                        if (p.userId) {
+                          const uidNorm = normalizeParticipantUserId(p.userId);
+                          const v = uidNorm ? voteMap[uidNorm] : undefined;
+                          if (v === VOTE_STATUS.APPROVE) status = VOTE_STATUS.APPROVE;
+                          else if (v === VOTE_STATUS.OPPOSE) status = VOTE_STATUS.OPPOSE;
+                          else status = 'pending';
+                        }
+
+                        return (
+                          <div
+                            key={p.key}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              gap: 10,
+                              minHeight: 20,
+                              minWidth: 0,
+                            }}
+                          >
+                            <span
+                              style={{
+                                flex: 1,
+                                fontSize: 11,
+                                color: C.fg2,
+                                overflow: 'hidden',
+                                whiteSpace: 'nowrap',
+                                textOverflow: 'ellipsis',
+                              }}
+                              title={p.label}
+                            >
+                              {p.label}
+                            </span>
+                            <span style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center' }}>
+                              {status === VOTE_STATUS.APPROVE ? (
+                                <Icon name="check" size={14} color={C.emerald} />
+                              ) : status === VOTE_STATUS.OPPOSE ? (
+                                <Icon name="x" size={14} color={C.coral} />
+                              ) : (
+                                <span
+                                  style={{
+                                    fontSize: 10,
+                                    fontWeight: 600,
+                                    letterSpacing: '0.02em',
+                                    color: C.fg4,
+                                  }}
+                                >
+                                  {t('votePending')}
+                                </span>
+                              )}
+                            </span>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              </div>
+            </>
+          ) : null}
+
+          {import.meta.env.DEV ? (
+            <div
+              style={{
+                marginTop: 8,
+                padding: 10,
+                borderRadius: 6,
+                border: `1px dashed ${C.border}`,
+                background: '#fffef7',
+                fontSize: 10,
+                color: C.fg3,
+              }}
+            >
+              <p style={{ margin: '0 0 8px', fontWeight: 600 }}>{t('devMockScenarios')}</p>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                <button
+                  type="button"
+                  onClick={() => switchMockScenario('normal')}
+                  style={{
+                    fontSize: 10,
+                    padding: '4px 8px',
+                    borderRadius: 4,
+                    border: `1px solid ${C.border}`,
+                    background: C.white,
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                  }}
+                >
+                  {t('devScenarioNormal')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => switchMockScenario('insufficient')}
+                  style={{
+                    fontSize: 10,
+                    padding: '4px 8px',
+                    borderRadius: 4,
+                    border: `1px solid ${C.border}`,
+                    background: C.white,
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                  }}
+                >
+                  {t('devScenarioInsufficient')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAiAnalysisResult(null)}
+                  style={{
+                    fontSize: 10,
+                    padding: '4px 8px',
+                    borderRadius: 4,
+                    border: `1px solid ${C.border}`,
+                    background: C.white,
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                  }}
+                >
+                  {t('devScenarioReset')}
+                </button>
+              </div>
+            </div>
+          ) : null}
           </div>
         </div>
 
@@ -3283,6 +3903,7 @@ export default function WorkspacePage() {
   const [nameDraft, setNameDraft] = useState('');
   const [sprintDraft, setSprintDraft] = useState('');
   const [descriptionDraft, setDescriptionDraft] = useState('');
+  const [overviewOpen, setOverviewOpen] = useState(false);
   const [designImage, setDesignImage] = useState({ id: null, url: '', storagePath: '' });
   const [uploadState, setUploadState] = useState({ status: 'idle', message: '' });
   const [viewingSprint, setViewingSprint] = useState(
@@ -3307,7 +3928,9 @@ export default function WorkspacePage() {
 
       const { data, error } = await supabase
         .from('projects')
-        .select('id, name, description, status, progress, sprint_number, consensus_note, user_id')
+        .select(
+          'id, name, description, description_short, description_detail, north_star, progress, sprint_number, consensus_note, user_id, is_completed, start_date, due_date, priority_aesthetics_functionality, priority_cost_quality, priority_speed_stability',
+        )
         .eq('id', projectId)
         .single();
 
@@ -3333,10 +3956,6 @@ export default function WorkspacePage() {
     ...fallbackProject,
     ...(projectMeta || {}),
   };
-  const normalizedStatus = String(projectMeta?.status || fallbackProject.status || '')
-    .toLowerCase()
-    .trim();
-
   /** Matches header “Sprint #…”; timeline `viewingSprint` can differ when browsing past dots. sprint_votes use this sprint. */
   const workspaceCanonicalSprint = Number(projectMeta?.sprint_number ?? fallbackProject.sprint ?? 0);
   const conflictPanelSprintNumber =
@@ -3367,7 +3986,7 @@ export default function WorkspacePage() {
   useEffect(() => {
     setNameDraft(projectMeta?.name || fallbackProject.name || '');
     setSprintDraft(String(projectMeta?.sprint_number ?? fallbackProject.sprint ?? ''));
-    setDescriptionDraft(projectMeta?.description || '');
+    setDescriptionDraft(projectShortDescription(projectMeta));
   }, [projectMeta, fallbackProject.name, fallbackProject.sprint]);
 
   useEffect(() => {
@@ -3394,18 +4013,14 @@ export default function WorkspacePage() {
 
   async function updateProjectFields(patch) {
     if (!projectId || !patch || Object.keys(patch).length === 0) return false;
-    const normalizedPatch = {
-      ...patch,
-      ...(typeof patch.status === 'string'
-        ? { status: patch.status.toLowerCase() }
-        : {}),
-    };
     setSavingMeta(true);
     const { data, error } = await supabase
       .from('projects')
-      .update(normalizedPatch)
+      .update(patch)
       .eq('id', projectId)
-      .select('id, name, description, status, progress, sprint_number, consensus_note')
+      .select(
+        'id, name, description, description_short, description_detail, north_star, progress, sprint_number, consensus_note, is_completed, start_date, due_date, priority_aesthetics_functionality, priority_cost_quality, priority_speed_stability',
+      )
       .single();
     setSavingMeta(false);
     if (error) {
@@ -3413,7 +4028,7 @@ export default function WorkspacePage() {
       console.error('[WorkspacePage] project update failed', error);
       return false;
     }
-    setProjectMeta((prev) => ({ ...(prev || {}), ...(data || normalizedPatch) }));
+    setProjectMeta((prev) => ({ ...(prev || {}), ...(data || patch) }));
     return true;
   }
 
@@ -3444,9 +4059,12 @@ export default function WorkspacePage() {
     if (!editingDescription) return;
     setEditingDescription(false);
     const nextDescription = descriptionDraft.trim();
-    const currentDescription = (projectMeta?.description || '').trim();
+    const currentDescription = projectShortDescription(projectMeta).trim();
     if (nextDescription === currentDescription) return;
-    await updateProjectFields({ description: nextDescription });
+    await updateProjectFields({
+      description_short: nextDescription,
+      description: nextDescription,
+    });
   }
 
   async function handleAddSprint() {
@@ -3710,6 +4328,39 @@ export default function WorkspacePage() {
   return (
     <>
       <Header
+        onBack={() => navigate('/hub')}
+        showLiveSession={false}
+        showLangSwitcher={false}
+        rightSlot={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setOverviewOpen(true);
+              }}
+              title={t('overview')}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '6px 12px',
+                background: C.white,
+                border: `1px solid ${C.border}`,
+                borderRadius: 6,
+                cursor: 'pointer',
+                fontSize: 12,
+                fontWeight: 600,
+                color: C.fg2,
+                fontFamily: 'inherit',
+              }}
+            >
+              <Icon name="info" size={18} color={C.fg2} />
+              {t('overview')}
+            </button>
+            <LanguageDropdown />
+          </div>
+        }
         title={
           editingName ? (
             <input
@@ -3748,87 +4399,92 @@ export default function WorkspacePage() {
           )
         }
         subtitle={
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-            {editingSprint ? (
-              <input
-                type="number"
-                min={0}
-                value={sprintDraft}
-                onChange={(e) => setSprintDraft(e.target.value)}
-                onBlur={commitSprintEdit}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    commitSprintEdit();
-                  } else if (e.key === 'Escape') {
-                    setEditingSprint(false);
-                    setSprintDraft(String(projectMeta?.sprint_number ?? fallbackProject.sprint ?? ''));
-                  }
-                }}
-                autoFocus
-                style={{
-                  width: 90,
-                  fontSize: 11,
-                  color: C.fg2,
-                  border: `1px solid ${C.border}`,
-                  borderRadius: 4,
-                  padding: '1px 6px',
-                  fontFamily: 'inherit',
-                }}
-              />
-            ) : (
-              <span
-                onClick={() => setEditingSprint(true)}
-                title="Click to edit sprint"
-                style={{ cursor: 'text' }}
-              >
-                Sprint #{projectMeta?.sprint_number ?? fallbackProject.sprint ?? 0}
-              </span>
-            )}
-            <span aria-hidden="true">·</span>
-            {editingDescription ? (
-              <input
-                value={descriptionDraft}
-                onChange={(e) => setDescriptionDraft(e.target.value)}
-                onBlur={commitDescriptionEdit}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    commitDescriptionEdit();
-                  } else if (e.key === 'Escape') {
-                    setEditingDescription(false);
-                    setDescriptionDraft(projectMeta?.description || '');
-                  }
-                }}
-                autoFocus
-                placeholder={t('projectDescriptionPlaceholder')}
-                style={{
-                  width: 360,
-                  maxWidth: '55vw',
-                  fontSize: 11,
-                  color: C.fg2,
-                  border: `1px solid ${C.border}`,
-                  borderRadius: 4,
-                  padding: '1px 7px',
-                  fontFamily: 'inherit',
-                }}
-              />
-            ) : (
-              <span
-                onClick={() => setEditingDescription(true)}
-                title="Click to edit description"
-                style={{
-                  cursor: 'text',
-                  color: (projectMeta?.description || '').trim() ? undefined : C.fg4,
-                }}
-              >
-                {(projectMeta?.description || '').trim() || t('projectDescriptionPlaceholder')}
-                {savingMeta ? ' · Saving...' : ''}
-              </span>
-            )}
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              {editingSprint ? (
+                <input
+                  type="number"
+                  min={0}
+                  value={sprintDraft}
+                  onChange={(e) => setSprintDraft(e.target.value)}
+                  onBlur={commitSprintEdit}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      commitSprintEdit();
+                    } else if (e.key === 'Escape') {
+                      setEditingSprint(false);
+                      setSprintDraft(String(projectMeta?.sprint_number ?? fallbackProject.sprint ?? ''));
+                    }
+                  }}
+                  autoFocus
+                  style={{
+                    width: 90,
+                    fontSize: 11,
+                    color: C.fg2,
+                    border: `1px solid ${C.border}`,
+                    borderRadius: 4,
+                    padding: '1px 6px',
+                    fontFamily: 'inherit',
+                  }}
+                />
+              ) : (
+                <span
+                  onClick={() => setEditingSprint(true)}
+                  title="Click to edit sprint"
+                  style={{ cursor: 'text' }}
+                >
+                  Sprint #{projectMeta?.sprint_number ?? fallbackProject.sprint ?? 0}
+                </span>
+              )}
+              <span aria-hidden="true">·</span>
+              {editingDescription ? (
+                <input
+                  value={descriptionDraft}
+                  onChange={(e) => setDescriptionDraft(e.target.value)}
+                  onBlur={commitDescriptionEdit}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      commitDescriptionEdit();
+                    } else if (e.key === 'Escape') {
+                      setEditingDescription(false);
+                      setDescriptionDraft(projectShortDescription(projectMeta));
+                    }
+                  }}
+                  autoFocus
+                  placeholder={t('projectDescriptionPlaceholder')}
+                  style={{
+                    width: 360,
+                    maxWidth: '55vw',
+                    fontSize: 11,
+                    color: C.fg2,
+                    border: `1px solid ${C.border}`,
+                    borderRadius: 4,
+                    padding: '1px 7px',
+                    fontFamily: 'inherit',
+                  }}
+                />
+              ) : (
+                <span
+                  onClick={() => setEditingDescription(true)}
+                  title="Click to edit description"
+                  style={{
+                    cursor: 'text',
+                    color: projectShortDescription(projectMeta).trim() ? undefined : C.fg4,
+                  }}
+                >
+                  {projectShortDescription(projectMeta).trim() || t('projectDescriptionPlaceholder')}
+                  {savingMeta ? ' · Saving...' : ''}
+                </span>
+              )}
           </span>
         }
-        status={normalizedStatus || undefined}
+      />
+
+      <ProjectOverviewModal
+        open={overviewOpen}
+        onClose={() => setOverviewOpen(false)}
+        project={resolvedProject}
       />
       <div
         style={{
@@ -3975,6 +4631,16 @@ export default function WorkspacePage() {
             navigate(`/project/${resolvedProject.id}/consensus`);
           }}
           onReject={() => {}}
+          geminiProject={{
+            name: resolvedProject.name || '',
+            description_short:
+              projectMeta?.description_short ?? projectShortDescription(projectMeta) ?? '',
+            north_star: projectMeta?.north_star ?? '',
+            priority_aesthetics_functionality: projectMeta?.priority_aesthetics_functionality ?? null,
+            priority_cost_quality: projectMeta?.priority_cost_quality ?? null,
+            priority_speed_stability: projectMeta?.priority_speed_stability ?? null,
+          }}
+          designImageUrls={designImage?.url ? [designImage.url] : []}
         />
       </div>
       {deleteSprintTarget ? (

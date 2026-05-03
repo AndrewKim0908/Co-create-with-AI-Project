@@ -5,6 +5,7 @@ import Layout from '@/components/Layout';
 import LoginPage from '@/pages/LoginPage';
 import Signup from '@/pages/Signup';
 import HubPage from '@/pages/HubPage';
+import CreateProjectPage from '@/pages/CreateProjectPage';
 import TimelinePage from '@/pages/TimelinePage';
 import WorkspacePage from '@/pages/WorkspacePage';
 import ConsensusPage from '@/pages/ConsensusPage';
@@ -75,6 +76,7 @@ export default function App() {
 
       <Route element={<Layout user={user} />}>
         <Route path="/hub" element={<HubPage user={user} />} />
+        <Route path="/create" element={<CreateProjectPage user={user} />} />
 
         {/* Project-scoped routes — sidebar + page headers stay
             in sync with the :projectId param. */}

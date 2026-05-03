@@ -1,5 +1,4 @@
 import Icon from './Icon';
-import StatusBadge from './StatusBadge';
 import LangSwitcher from './LangSwitcher';
 import Btn from './Btn';
 import { C } from '@/constants/colors';
@@ -12,11 +11,14 @@ import { useLang } from '@/i18n/LangContext';
 export default function Header({
   title,
   subtitle,
-  status,
   action,
   actionLabel,
   onBack,
   showLangSwitcher = true,
+  /** When false, hides the pulsing “Live session” row (e.g. workspace). */
+  showLiveSession = true,
+  /** When set, renders instead of the default `LangSwitcher`. */
+  rightSlot = null,
 }) {
   const { t } = useLang();
   return (
@@ -50,7 +52,6 @@ export default function Header({
           >
             {title}
           </span>
-          {status && <StatusBadge status={status} />}
         </div>
         {subtitle && (
           <div style={{ fontSize: 11, color: C.fg3, marginTop: 1 }}>{subtitle}</div>
@@ -58,25 +59,27 @@ export default function Header({
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <div
-          style={{
-            fontSize: 11, color: C.fg3, display: 'flex', alignItems: 'center', gap: 5,
-          }}
-        >
+        {showLiveSession ? (
           <div
             style={{
-              width: 6, height: 6, borderRadius: '50%',
-              background: C.emerald, animation: 'pulse-dot 2s infinite',
+              fontSize: 11, color: C.fg3, display: 'flex', alignItems: 'center', gap: 5,
             }}
-          />
-          {t('liveSession')}
-        </div>
+          >
+            <div
+              style={{
+                width: 6, height: 6, borderRadius: '50%',
+                background: C.emerald, animation: 'pulse-dot 2s infinite',
+              }}
+            />
+            {t('liveSession')}
+          </div>
+        ) : null}
         {action && (
           <Btn variant="primary" size="sm" onClick={action}>
             {actionLabel}
           </Btn>
         )}
-        {showLangSwitcher && <LangSwitcher />}
+        {rightSlot != null ? rightSlot : showLangSwitcher ? <LangSwitcher /> : null}
       </div>
     </header>
   );
