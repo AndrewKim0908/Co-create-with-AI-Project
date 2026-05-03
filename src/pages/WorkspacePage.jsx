@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useNavigate, useParams, useLocation } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import Header from '@/components/Header';
 import Icon from '@/components/Icon';
 import LanguageDropdown from '@/components/LanguageDropdown';
@@ -50,12 +50,17 @@ function DesignMarker({
   onCancelPending,
   onDelete,
   canDelete = false,
+  myEmail = '',
+  isReadOnlySprint = false,
+  readOnlyDebug = null,
+  viewingSprintFromWorkspacePage = undefined,
   markerColor = C.coral,
   noteColor = C.fg2,
 }) {
   const { lang } = useLang();
   const rootRef = useRef(null);
   const anchorRef = useRef(null);
+  const contextMenuPosRef = useRef({ x: 0, y: 0 });
   const [pendingPopPos, setPendingPopPos] = useState({ left: 0, top: 0 });
   const [hovered, setHovered] = useState(false);
   const [deleteMenu, setDeleteMenu] = useState(false);
@@ -75,6 +80,14 @@ function DesignMarker({
     document.addEventListener('mousedown', onDocDown);
     return () => document.removeEventListener('mousedown', onDocDown);
   }, [deleteMenu]);
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    if (!(deleteMenu && !isPending && canDelete)) return;
+    const contextMenuMarkerId = marker.id;
+    const contextMenuPos = contextMenuPosRef.current;
+    console.log('[Marker] contextMenu state', contextMenuMarkerId, contextMenuPos);
+  }, [deleteMenu, isPending, canDelete, marker.id]);
 
   useLayoutEffect(() => {
     if (!isPending || !anchorRef.current) return undefined;
@@ -201,9 +214,34 @@ function DesignMarker({
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
         onContextMenu={(e) => {
-          if (isPending || !canDelete) return;
+          if (import.meta.env.DEV) {
+            console.log('[Marker] right-click fired', marker.id);
+            console.log(
+              '[Marker] canDelete:',
+              canDelete,
+              'isPending:',
+              isPending,
+              'myEmail:',
+              myEmail,
+              'isReadOnlySprint:',
+              isReadOnlySprint,
+            );
+            if (readOnlyDebug) {
+              console.log('[ReadOnly Debug]', {
+                ...readOnlyDebug,
+                viewingSprintFromWorkspacePage,
+              });
+            }
+          }
           e.preventDefault();
           e.stopPropagation();
+          if (isPending) return;
+          if (isReadOnlySprint) {
+            window.alert('현재 스프린트에서만 삭제 가능합니다');
+            return;
+          }
+          if (!canDelete) return;
+          contextMenuPosRef.current = { x: e.clientX, y: e.clientY };
           setDeleteMenu(true);
         }}
       >
@@ -421,11 +459,21 @@ function BlueprintViewer({
     return v;
   })();
   const isReadOnlySprint =
+    viewingSprint != null &&
+    viewingSprint !== '' &&
+    Number(viewingSprint) >= 1 &&
     Number.isFinite(currentSprintNum) &&
     currentSprintNum >= 1 &&
-    Number.isFinite(effectiveViewingSprint) &&
-    effectiveViewingSprint >= 1 &&
-    effectiveViewingSprint !== currentSprintNum;
+    Number(viewingSprint) !== currentSprintNum;
+
+  const readOnlyDebug = {
+    currentSprint,
+    currentSprintNum,
+    viewingSprint,
+    effectiveViewingSprint,
+    isReadOnlySprint,
+  };
+
   /** 버튼 활성화 확인용: 항상 켜 둠. 실제 찍기는 `designImageUrl` / read-only에서 제한. */
   const canAddMarker = true;
 
@@ -704,6 +752,10 @@ function BlueprintViewer({
       clearPendingDraft();
       setMarkerMode(false);
     } else {
+      if (isReadOnlySprint) {
+        window.alert('마커는 현재 스프린트에서만 추가할 수 있습니다');
+        return;
+      }
       if (!String(designImageUrl || '').trim()) {
         window.alert('먼저 디자인 이미지를 업로드해 주세요.');
         return;
@@ -733,6 +785,7 @@ function BlueprintViewer({
     }
     if (!String(designImageUrl || '').trim()) return;
     if (!markerMode || handTool) return;
+    if (isReadOnlySprint) return;
     if (e.target.closest('[data-marker-root]')) return;
     if (!projectId) return;
     const el = canvasRef.current;
@@ -913,6 +966,10 @@ function BlueprintViewer({
             onConfirmNote={confirmPendingNote}
             onCancelPending={cancelPending}
             canDelete={canDeleteMarker}
+            myEmail={myEmail}
+            isReadOnlySprint={isReadOnlySprint}
+            readOnlyDebug={readOnlyDebug}
+            viewingSprintFromWorkspacePage={viewingSprint}
             markerColor={markerUserColor}
             noteColor={markerUserColor}
             onDelete={async (markerId) => {
@@ -940,6 +997,10 @@ function BlueprintViewer({
                 onConfirmNote={confirmPendingNote}
                 onCancelPending={cancelPending}
                 canDelete={false}
+                myEmail={String(currentUserEmail || '').trim().toLowerCase()}
+                isReadOnlySprint={isReadOnlySprint}
+                readOnlyDebug={readOnlyDebug}
+                viewingSprintFromWorkspacePage={viewingSprint}
                 markerColor={myColor}
                 noteColor={myColor}
                 onDelete={() => {}}
@@ -1099,7 +1160,13 @@ function BlueprintViewer({
             e.stopPropagation();
             toggleMarkerMode();
           }}
-          title={markerMode ? '마킹 끄기' : '마킹 켜기'}
+          title={
+            isReadOnlySprint
+              ? '마커는 현재 스프린트에서만 추가할 수 있습니다'
+              : markerMode
+                ? '마킹 끄기'
+                : '마킹 켜기'
+          }
           style={{
             width: 30,
             height: 30,
@@ -1109,11 +1176,11 @@ function BlueprintViewer({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            cursor: 'pointer',
+            cursor: isReadOnlySprint ? 'not-allowed' : 'pointer',
             boxShadow: markerMode
               ? '0 1px 6px rgba(208,80,69,0.2)'
               : '0 1px 3px rgba(30,42,53,0.08)',
-            opacity: 1,
+            opacity: isReadOnlySprint ? 0.55 : 1,
           }}
         >
           <Icon
@@ -4092,7 +4159,6 @@ export default function WorkspacePage() {
   const { t } = useLang();
   const navigate = useNavigate();
   const { projectId } = useParams();
-  const location = useLocation();
   const fallbackProject = getProjectById(projectId) || DEFAULT_PROJECT;
   const [projectMeta, setProjectMeta] = useState(null);
   const [savingMeta, setSavingMeta] = useState(false);
@@ -4105,9 +4171,7 @@ export default function WorkspacePage() {
   const [overviewOpen, setOverviewOpen] = useState(false);
   const [designImage, setDesignImage] = useState({ id: null, url: '', storagePath: '' });
   const [uploadState, setUploadState] = useState({ status: 'idle', message: '' });
-  const [viewingSprint, setViewingSprint] = useState(
-    location.state?.sprintNumber ?? null,
-  );
+  const [viewingSprint, setViewingSprint] = useState(null);
   const [deleteSprintTarget, setDeleteSprintTarget] = useState(null);
   const [chatWidth, setChatWidth] = useState(230);
   const [conflictWidth, setConflictWidth] = useState(230);
@@ -4223,14 +4287,15 @@ export default function WorkspacePage() {
   }, [projectMeta, fallbackProject.name, fallbackProject.sprint]);
 
   useEffect(() => {
+    setViewingSprint(null);
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!projectId) return;
     const current = Number(projectMeta?.sprint_number ?? fallbackProject.sprint ?? 0);
-    setViewingSprint((prev) => {
-      if (prev == null) return current;
-      const p = Number(prev);
-      if (p === 0 && Number.isFinite(current) && current >= 1) return current;
-      return prev;
-    });
-  }, [projectMeta?.sprint_number, fallbackProject.sprint]);
+    if (!Number.isFinite(current) || current < 1) return;
+    setViewingSprint(current);
+  }, [projectId, projectMeta?.sprint_number, fallbackProject.sprint]);
 
   useEffect(() => {
     if (!projectId) return undefined;
