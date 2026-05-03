@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import Icon from '@/components/Icon';
 import LangSwitcher from '@/components/LangSwitcher';
@@ -10,6 +10,7 @@ import { supabase } from '@/lib/supabase';
  * Email/password auth (sign in + sign up).
  */
 export default function LoginPage() {
+  const navigate = useNavigate();
   const { t } = useLang();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -40,7 +41,17 @@ export default function LoginPage() {
 
   return (
     <div className="relative flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-50 to-slate-25 px-4 py-10 font-sans">
-      <div className="absolute right-6 top-5">
+      <div className="absolute left-6 top-5 z-10">
+        <button
+          type="button"
+          onClick={() => navigate('/')}
+          className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white/90 px-3 py-2 text-sm font-medium text-fg-2 shadow-sm backdrop-blur-sm transition-colors hover:border-slate-300 hover:bg-white hover:text-fg-1 focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+        >
+          <span aria-hidden>←</span>
+          Back to home
+        </button>
+      </div>
+      <div className="absolute right-6 top-5 z-10">
         <LangSwitcher />
       </div>
 

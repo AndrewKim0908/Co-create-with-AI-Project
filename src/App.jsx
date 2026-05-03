@@ -4,7 +4,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import Layout from '@/components/Layout';
 import LandingPage from '@/pages/LandingPage';
 import LoginPage from '@/pages/LoginPage';
-import Signup from '@/pages/Signup';
+import SignupPage from '@/pages/Signup';
 import HubPage from '@/pages/HubPage';
 import CreateProjectPage from '@/pages/CreateProjectPage';
 import TimelinePage from '@/pages/TimelinePage';
@@ -65,12 +65,10 @@ export default function App() {
 
   return (
     <Routes>
+      {/* Public: 랜딩·인증만. 로그인 시 / · /login · /signup → /hub */}
       <Route path="/" element={user ? <Navigate to="/hub" replace /> : <LandingPage />} />
       <Route path="/login" element={user ? <Navigate to="/hub" replace /> : <LoginPage />} />
-      <Route
-        path="/signup"
-        element={user ? <Navigate to="/hub" replace /> : <Signup />}
-      />
+      <Route path="/signup" element={user ? <Navigate to="/hub" replace /> : <SignupPage />} />
       <Route path="/demo" element={<DemoPage />} />
 
       <Route element={<Layout user={user} />}>

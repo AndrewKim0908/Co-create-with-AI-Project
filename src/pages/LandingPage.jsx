@@ -98,8 +98,6 @@ export default function LandingPage() {
           --nav-fade: rgba(15,22,36,0.92);
           --ghost-border: rgba(255,255,255,0.18);
           --ghost-hover-bg: rgba(255,255,255,0.05);
-          --mockup-bar: #071220;
-          --mockup-inner: #0d1b2e;
         }
 
         .landing-root[data-theme="light"] {
@@ -115,16 +113,15 @@ export default function LandingPage() {
           --nav-fade: rgba(248,250,252,0.92);
           --ghost-border: rgba(15,23,42,0.18);
           --ghost-hover-bg: rgba(15,23,42,0.06);
-          --mockup-bar: #0f172a;
-          --mockup-inner: #1e293b;
         }
 
         .landing-root {
           min-height: 100vh;
+          overflow-y: auto;
+          overflow-x: hidden;
           background: var(--bg);
           color: var(--txt);
           font-family: 'DM Sans', sans-serif;
-          overflow-x: hidden;
         }
 
         .landing-root .reveal {
@@ -228,81 +225,263 @@ export default function LandingPage() {
         }
 
         .landing-root .mockup-bar {
-          background: var(--mockup-bar);
           padding: 12px 16px;
-          display: flex; align-items: center; gap: 6px;
-          border-bottom: 1px solid rgba(255,255,255,0.05);
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          border-bottom: 1px solid rgba(255,255,255,0.08);
         }
+        .landing-root[data-theme="dark"] .mockup-bar {
+          background: #071220;
+        }
+        .landing-root[data-theme="light"] .mockup-bar {
+          background: #e2e8f0;
+          border-bottom-color: #cbd5e1;
+        }
+
         .landing-root .dot { width: 10px; height: 10px; border-radius: 50%; }
         .landing-root .url-bar {
-          flex: 1; background: rgba(255,255,255,0.05); border-radius: 5px;
-          padding: 3px 12px; font-size: 11px; color: var(--muted);
-          margin: 0 12px; text-align: center;
+          flex: 1;
+          border-radius: 5px;
+          padding: 3px 12px;
+          font-size: 11px;
+          margin: 0 12px;
+          text-align: center;
           font-family: 'DM Sans', sans-serif;
         }
-
-        .landing-root .mockup-inner { display: flex; height: 440px; background: var(--mockup-inner); }
-
-        .landing-root .m-sidebar {
-          width: 190px; background: var(--mockup-bar);
-          border-right: 1px solid rgba(255,255,255,0.05);
-          padding: 20px 12px; flex-shrink: 0;
+        .landing-root[data-theme="dark"] .url-bar {
+          background: rgba(255,255,255,0.05);
+          color: var(--muted);
+        }
+        .landing-root[data-theme="light"] .url-bar {
+          background: rgba(255,255,255,0.85);
+          color: #64748b;
         }
 
-        .landing-root .m-logo {
-          display: flex; align-items: center; gap: 9px;
-          padding: 0 8px; margin-bottom: 28px;
+        .landing-root .mockup-inner {
+          display: flex;
+          flex-direction: column;
+          min-height: 400px;
+          font-family: 'DM Sans', sans-serif;
         }
-        .landing-root .m-logo-icon {
-          width: 30px; height: 30px; border-radius: 7px;
+        .landing-root[data-theme="dark"] .mockup-inner {
+          background: #0d1b2e;
+        }
+        .landing-root[data-theme="light"] .mockup-inner {
+          background: #f8fafc;
+        }
+
+        .landing-root[data-theme="dark"] .mockup-sidebar {
+          background: #071220;
+        }
+        .landing-root[data-theme="light"] .mockup-sidebar {
+          background: #1e2b3c;
+        }
+        .landing-root[data-theme="light"] .mockup-sidebar .mockup-text {
+          color: #f1f5f9;
+        }
+        .landing-root[data-theme="light"] .mockup-sidebar .mockup-muted {
+          color: #94a3b8;
+        }
+        .landing-root[data-theme="light"] .mockup-sidebar .ws-chat-bubble {
+          background: rgba(255,255,255,0.1);
+          border-color: rgba(255,255,255,0.12);
+          color: #f1f5f9;
+        }
+
+        .landing-root[data-theme="dark"] .mockup-kpi {
+          background: rgba(255,255,255,0.04);
+          border: 1px solid rgba(255,255,255,0.08);
+        }
+        .landing-root[data-theme="light"] .mockup-kpi {
+          background: #f1f5f9;
+          border-color: #e2e8f0;
+        }
+
+        .landing-root[data-theme="dark"] .mockup-text {
+          color: #f0f4f8;
+        }
+        .landing-root[data-theme="light"] .mockup-text {
+          color: #1e293b;
+        }
+
+        .landing-root[data-theme="dark"] .mockup-muted {
+          color: #7a9bb5;
+        }
+        .landing-root[data-theme="light"] .mockup-muted {
+          color: #64748b;
+        }
+
+        .landing-root .ws-app-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 8px;
+          padding: 8px 12px;
+          border-bottom: 1px solid rgba(255,255,255,0.07);
+          font-size: 10px;
+        }
+        .landing-root[data-theme="light"] .ws-app-header {
+          border-bottom-color: #e2e8f0;
+        }
+
+        .landing-root .ws-body {
+          display: flex;
+          flex: 1;
+          min-height: 0;
+        }
+
+        .landing-root .mockup-sidebar {
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          min-width: 0;
+          border-right: 1px solid rgba(255,255,255,0.07);
+        }
+        .landing-root[data-theme="light"] .mockup-sidebar {
+          border-right-color: #334155;
+        }
+
+        .landing-root .ws-timeline {
+          padding: 8px 10px 6px;
+          border-bottom: 1px solid rgba(255,255,255,0.06);
+        }
+        .landing-root[data-theme="light"] .ws-timeline {
+          border-bottom-color: rgba(51,65,85,0.5);
+        }
+
+        .landing-root .ws-timeline-dots {
+          display: flex;
+          align-items: center;
+          gap: 5px;
+          margin-top: 6px;
+        }
+        .landing-root .ws-timeline-dot {
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          background: rgba(255,255,255,0.15);
+        }
+        .landing-root[data-theme="light"] .ws-timeline-dot {
+          background: rgba(255,255,255,0.25);
+        }
+        .landing-root .ws-timeline-dot.active {
           background: var(--em);
-          display: flex; align-items: center; justify-content: center;
-          font-size: 13px; font-weight: 700; color: white;
+          box-shadow: 0 0 0 2px rgba(16,185,129,0.35);
+        }
+
+        .landing-root .ws-canvas-wrap {
+          flex: 1;
+          padding: 8px 10px;
+          display: flex;
+          flex-direction: column;
+          min-height: 0;
+        }
+
+        .landing-root .ws-canvas {
+          flex: 1;
+          border-radius: 8px;
+          border: 1px dashed rgba(16,185,129,0.35);
+          background: rgba(16,185,129,0.06);
+          position: relative;
+          min-height: 120px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .landing-root[data-theme="light"] .ws-canvas {
+          background: rgba(241,245,249,0.9);
+          border-color: rgba(5,150,105,0.35);
+        }
+
+        .landing-root .ws-canvas-hint {
+          font-size: 9px;
+          text-align: center;
+          padding: 0 12px;
+          line-height: 1.4;
+        }
+
+        .landing-root .ws-marker-pin {
+          position: absolute;
+          width: 10px;
+          height: 10px;
+          border-radius: 50%;
+          background: #f87171;
+          border: 2px solid #fff;
+          box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+        }
+        .landing-root .ws-marker-pin.emerald { background: var(--em); }
+        .landing-root .ws-marker-pin.amber { background: #fbbf24; }
+
+        .landing-root .ws-chat {
+          padding: 6px 10px 8px;
+          border-top: 1px solid rgba(255,255,255,0.06);
+        }
+        .landing-root[data-theme="light"] .ws-chat {
+          border-top-color: rgba(51,65,85,0.5);
+        }
+
+        .landing-root .ws-chat-row {
+          display: flex;
+          gap: 6px;
+          align-items: flex-end;
+        }
+        .landing-root .ws-chat-bubble {
+          max-width: 72%;
+          padding: 5px 8px;
+          border-radius: 8px 8px 8px 2px;
+          font-size: 9px;
+          line-height: 1.35;
+          background: rgba(255,255,255,0.08);
+          border: 1px solid rgba(255,255,255,0.06);
+        }
+        .landing-root[data-theme="light"] .ws-chat-bubble {
+          background: #fff;
+          border-color: #e2e8f0;
+        }
+
+        .landing-root .ws-right-panel {
+          width: 124px;
+          flex-shrink: 0;
+          padding: 8px 8px 8px 6px;
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+          background: rgba(0,0,0,0.12);
+        }
+        .landing-root[data-theme="light"] .ws-right-panel {
+          background: rgba(241,245,249,0.95);
+          border-left: 1px solid #e2e8f0;
+        }
+
+        .landing-root .ws-ai-btn {
+          width: 100%;
+          padding: 6px 6px;
+          border-radius: 6px;
+          border: none;
+          font-size: 8px;
+          font-weight: 600;
           font-family: 'DM Sans', sans-serif;
+          background: var(--em);
+          color: #fff;
+          cursor: default;
+          line-height: 1.25;
         }
-        .landing-root .m-logo-text { font-size: 13px; font-weight: 500; line-height: 1.2; color: var(--txt); }
-        .landing-root .m-logo-sub { font-size: 9px; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; }
 
-        .landing-root .m-nav-item {
-          display: flex; align-items: center; gap: 9px;
-          padding: 8px 10px; border-radius: 8px;
-          font-size: 13px; color: var(--muted); margin-bottom: 2px;
-          font-family: 'DM Sans', sans-serif;
+        .landing-root .mockup-kpi {
+          border-radius: 6px;
+          padding: 6px 7px;
+          font-size: 8px;
+          line-height: 1.35;
         }
-        .landing-root .m-nav-item.active { background: rgba(16,185,129,0.15); color: var(--em); }
-        .landing-root .m-nav-icon { width: 14px; height: 14px; border-radius: 2px; background: currentColor; opacity: 0.6; flex-shrink: 0; }
 
-        .landing-root .m-main { flex: 1; padding: 22px; overflow: hidden; }
-        .landing-root .m-header-title { font-size: 17px; font-weight: 600; margin-bottom: 2px; font-family: 'DM Sans', sans-serif; color: var(--txt); }
-        .landing-root .m-header-sub { font-size: 11px; color: var(--muted); margin-bottom: 18px; font-family: 'DM Sans', sans-serif; }
-
-        .landing-root .kpi-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; margin-bottom: 18px; }
-        .landing-root .kpi { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.07); border-radius: 9px; padding: 12px; }
-        .landing-root[data-theme="light"] .kpi {
-          background: rgba(255,255,255,0.5);
-          border: 1px solid var(--border);
+        .landing-root .mockup-kpi-title {
+          font-size: 7px;
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: 0.04em;
+          margin-bottom: 4px;
         }
-        .landing-root .kpi-label { font-size: 9px; color: var(--muted); letter-spacing: 0.6px; text-transform: uppercase; margin-bottom: 5px; font-family: 'DM Sans', sans-serif; }
-        .landing-root .kpi-val { font-size: 22px; font-weight: 600; line-height: 1; font-family: 'DM Sans', sans-serif; }
-        .landing-root .kpi-sub { font-size: 10px; color: var(--muted); margin-top: 3px; font-family: 'DM Sans', sans-serif; }
-
-        .landing-root .proj-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-        .landing-root .proj-card {
-          background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.07);
-          border-top: 2px solid var(--em); border-radius: 9px; padding: 14px;
-        }
-        .landing-root[data-theme="light"] .proj-card {
-          background: rgba(255,255,255,0.55);
-          border: 1px solid var(--border);
-          border-top: 2px solid var(--em);
-        }
-        .landing-root .proj-name { font-size: 12px; font-weight: 500; margin-bottom: 3px; font-family: 'DM Sans', sans-serif; color: var(--txt); }
-        .landing-root .proj-sprint { font-size: 10px; color: var(--muted); margin-bottom: 10px; font-family: 'DM Sans', sans-serif; }
-        .landing-root .prog-row { display: flex; align-items: center; gap: 8px; }
-        .landing-root .prog-bg { flex: 1; height: 3px; border-radius: 2px; background: rgba(255,255,255,0.1); }
-        .landing-root[data-theme="light"] .prog-bg { background: rgba(15,23,42,0.12); }
-        .landing-root .prog-fill { height: 100%; border-radius: 2px; background: var(--em); }
-        .landing-root .prog-pct { font-size: 10px; color: var(--muted); white-space: nowrap; font-family: 'DM Sans', sans-serif; }
 
         .landing-root .feat-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 20px; max-width: 1060px; margin: 0 auto; }
 
@@ -540,67 +719,83 @@ export default function LandingPage() {
             <span className="dot" style={{ background: '#ff5f57' }} />
             <span className="dot" style={{ background: '#ffbd2e' }} />
             <span className="dot" style={{ background: '#28c840' }} />
-            <div className="url-bar">co-create-project-with-ai.netlify.app/hub</div>
+            <div className="url-bar">app.example.com/project/purifier-01/sprints</div>
           </div>
           <div className="mockup-inner">
-            <div className="m-sidebar">
-              <div className="m-logo">
-                <div className="m-logo-icon">C</div>
-                <div>
-                  <div className="m-logo-text">Co-Create AI</div>
-                  <div className="m-logo-sub">Decision Sprint</div>
+            <div className="ws-app-header">
+              <span className="mockup-text" style={{ fontWeight: 600 }}>
+                ← Back
+              </span>
+              <span className="mockup-text" style={{ fontWeight: 600, flex: 1, textAlign: 'center' }}>
+                Modular Air Purifier — Sprint #2
+              </span>
+              <span className="mockup-text" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                Overview <span aria-hidden>🌐</span>
+              </span>
+            </div>
+            <div className="ws-body">
+              <div className="mockup-sidebar">
+                <div className="ws-timeline">
+                  <div className="mockup-muted" style={{ fontSize: 8, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                    Sprint timeline
+                  </div>
+                  <div className="ws-timeline-dots">
+                    <div className="ws-timeline-dot" title="Sprint 1" />
+                    <div className="ws-timeline-dot active" title="Sprint 2" />
+                    <div className="ws-timeline-dot" title="Sprint 3" />
+                  </div>
+                </div>
+                <div className="ws-canvas-wrap">
+                  <div className="mockup-muted" style={{ fontSize: 8, marginBottom: 4, fontWeight: 600 }}>
+                    Design canvas
+                  </div>
+                  <div className="ws-canvas">
+                    <div className="ws-canvas-hint mockup-muted">
+                      Drop a design file or paste an image — teammates add markers on the blueprint.
+                    </div>
+                    <div className="ws-marker-pin" style={{ top: '28%', left: '34%' }} />
+                    <div className="ws-marker-pin emerald" style={{ top: '52%', left: '58%' }} />
+                    <div className="ws-marker-pin amber" style={{ top: '68%', left: '42%' }} />
+                  </div>
+                </div>
+                <div className="ws-chat">
+                  <div className="mockup-muted" style={{ fontSize: 7, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
+                    Team chat
+                  </div>
+                  <div className="ws-chat-row">
+                    <div className="ws-chat-bubble mockup-text">
+                      <strong className="mockup-muted">Alex ·</strong> Can we soften the corner radius on the intake grille?
+                    </div>
+                  </div>
                 </div>
               </div>
-              <div className="m-nav-item active">
-                <div className="m-nav-icon" style={{ borderRadius: 2 }} />
-                Project Hub
-              </div>
-              <div className="m-nav-item">
-                <div className="m-nav-icon" style={{ borderRadius: '50%' }} />
-                Settings
-              </div>
-              <div className="m-nav-item">
-                <div className="m-nav-icon" style={{ borderRadius: '50%' }} />
-                Help & docs
-              </div>
-            </div>
-            <div className="m-main">
-              <div className="m-header-title">Project Hub</div>
-              <div className="m-header-sub">Welcome back, designer@team.com</div>
-              <div className="kpi-grid">
-                {[
-                  { label: 'Active Projects', val: '2', sub: '4 total in org', color: 'var(--txt)' },
-                  { label: 'Open Conflicts', val: '7', sub: '↑ 2 this week', color: '#f87171' },
-                  { label: 'Avg Consensus', val: '78%', sub: 'Target ≥ 80%', color: 'var(--em)' },
-                  { label: 'Decision Sprints', val: '52', sub: 'All time', color: 'var(--txt)' },
-                ].map((s) => (
-                  <div className="kpi" key={s.label}>
-                    <div className="kpi-label">{s.label}</div>
-                    <div className="kpi-val" style={{ color: s.color }}>
-                      {s.val}
-                    </div>
-                    <div className="kpi-sub">{s.sub}</div>
+              <div className="ws-right-panel">
+                <button type="button" className="ws-ai-btn">
+                  Request AI Analysis
+                </button>
+                <div className="mockup-kpi">
+                  <div className="mockup-kpi-title mockup-muted">Active conflict</div>
+                  <div className="mockup-text" style={{ fontWeight: 600 }}>
+                    Finish vs. tool-less assembly
                   </div>
-                ))}
-              </div>
-              <div className="proj-grid">
-                {[
-                  { name: 'Modular Air Purifier', sprint: 'Sprint #1', pct: 88, color: 'var(--em)' },
-                  { name: 'EV Thermal Module', sprint: 'Sprint #3', pct: 45, color: 'var(--muted)' },
-                ].map((p) => (
-                  <div className="proj-card" key={p.name}>
-                    <div className="proj-name">{p.name}</div>
-                    <div className="proj-sprint">{p.sprint}</div>
-                    <div className="prog-row">
-                      <div className="prog-bg">
-                        <div className="prog-fill" style={{ width: `${p.pct}%` }} />
-                      </div>
-                      <span className="prog-pct" style={{ color: p.color }}>
-                        {p.pct}%
-                      </span>
-                    </div>
+                </div>
+                <div className="mockup-kpi">
+                  <div className="mockup-kpi-title mockup-muted">Positions</div>
+                  <div className="mockup-text" style={{ fontSize: 7, lineHeight: 1.4 }}>
+                    <span className="mockup-muted">Design:</span> soft-touch coat
+                    <br />
+                    <span className="mockup-muted">Eng:</span> snap-fit tolerance
                   </div>
-                ))}
+                </div>
+                <div className="mockup-kpi">
+                  <div className="mockup-kpi-title mockup-muted">Alternative proposal</div>
+                  <div className="mockup-text" style={{ fontSize: 7, lineHeight: 1.4 }}>
+                    Hybrid snap-fit + textured grip ring; ±0.2 mm on critical snaps.
+                  </div>
+                  <div className="mockup-muted" style={{ fontSize: 6, marginTop: 4 }}>
+                    Awaiting votes · 2 of 3 approved
+                  </div>
+                </div>
               </div>
             </div>
           </div>
