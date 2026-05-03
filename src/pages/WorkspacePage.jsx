@@ -399,6 +399,8 @@ function BlueprintViewer({
   const isReadOnlySprint =
     Number.isFinite(currentSprintNum) &&
     currentSprintNum >= 1 &&
+    Number.isFinite(effectiveViewingSprint) &&
+    effectiveViewingSprint >= 1 &&
     effectiveViewingSprint !== currentSprintNum;
   const canAddMarker = Boolean(designImageUrl) && !isReadOnlySprint;
 
@@ -697,7 +699,8 @@ function BlueprintViewer({
       skipNextMarkerClick.current = false;
       return;
     }
-    if (!markerMode || handTool || isReadOnlySprint || !designImageUrl) return;
+    if (!canAddMarker) return;
+    if (!markerMode || handTool) return;
     if (e.target.closest('[data-marker-root]')) return;
     if (!projectId) return;
     const el = canvasRef.current;
