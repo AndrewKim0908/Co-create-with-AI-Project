@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 
 import Layout from '@/components/Layout';
+import LandingPage from '@/pages/LandingPage';
 import LoginPage from '@/pages/LoginPage';
 import Signup from '@/pages/Signup';
 import HubPage from '@/pages/HubPage';
@@ -64,10 +65,8 @@ export default function App() {
 
   return (
     <Routes>
-      <Route
-        path="/"
-        element={user ? <Navigate to="/hub" replace /> : <LoginPage />}
-      />
+      <Route path="/" element={user ? <Navigate to="/hub" replace /> : <LandingPage />} />
+      <Route path="/login" element={user ? <Navigate to="/hub" replace /> : <LoginPage />} />
       <Route
         path="/signup"
         element={user ? <Navigate to="/hub" replace /> : <Signup />}
