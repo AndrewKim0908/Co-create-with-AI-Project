@@ -4361,11 +4361,13 @@ export default function WorkspacePage() {
 
   useEffect(() => {
     async function loadLatestDesign() {
+      if (!Number.isFinite(workspaceCanonicalSprint) || workspaceCanonicalSprint < 1) {
+        return;
+      }
       if (
         !Number.isFinite(Number(workspaceEffectiveViewingSprint)) ||
         workspaceEffectiveViewingSprint < 1
       ) {
-        setDesignImage({ id: null, url: '', storagePath: '' });
         return;
       }
       const sprintKey = Number(workspaceEffectiveViewingSprint);
