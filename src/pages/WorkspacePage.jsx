@@ -4634,14 +4634,24 @@ export default function WorkspacePage() {
     setViewingSprint(previousSprint);
     setDesignImage({ id: null, url: '', storagePath: '' });
 
-    const { error: deleteDesignError } = await supabase
-      .from('design_files')
+    const { error: deleteMessagesError } = await supabase
+      .from('messages')
       .delete()
       .eq('project_id', projectId)
       .eq('sprint_number', sprintToDelete);
-    if (deleteDesignError) {
+    if (deleteMessagesError) {
       // eslint-disable-next-line no-console
-      console.error('[WorkspacePage] delete sprint design_files failed', deleteDesignError);
+      console.error('[WorkspacePage] delete sprint messages failed', deleteMessagesError);
+    }
+
+    const { error: deleteVotesError } = await supabase
+      .from('sprint_votes')
+      .delete()
+      .eq('project_id', projectId)
+      .eq('sprint_number', sprintToDelete);
+    if (deleteVotesError) {
+      // eslint-disable-next-line no-console
+      console.error('[WorkspacePage] delete sprint sprint_votes failed', deleteVotesError);
     }
 
     const { error: deleteMarkerError } = await supabase
@@ -4652,6 +4662,26 @@ export default function WorkspacePage() {
     if (deleteMarkerError) {
       // eslint-disable-next-line no-console
       console.error('[WorkspacePage] delete sprint markers failed', deleteMarkerError);
+    }
+
+    const { error: deleteDesignError } = await supabase
+      .from('design_files')
+      .delete()
+      .eq('project_id', projectId)
+      .eq('sprint_number', sprintToDelete);
+    if (deleteDesignError) {
+      // eslint-disable-next-line no-console
+      console.error('[WorkspacePage] delete sprint design_files failed', deleteDesignError);
+    }
+
+    const { error: deleteAiAnalysisError } = await supabase
+      .from('sprint_ai_analysis')
+      .delete()
+      .eq('project_id', projectId)
+      .eq('sprint_number', sprintToDelete);
+    if (deleteAiAnalysisError) {
+      // eslint-disable-next-line no-console
+      console.error('[WorkspacePage] delete sprint sprint_ai_analysis failed', deleteAiAnalysisError);
     }
 
     await updateProjectFields({ sprint_number: previousSprint });
