@@ -3,7 +3,7 @@
  * Uses VITE_GEMINI_API_KEY. Image fetch failures are skipped (text-only).
  */
 
-const GEMINI_MODEL = 'gemini-2.0-flash-exp';
+const GEMINI_MODEL = 'gemini-2.5-flash-preview-04-17';
 
 const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
