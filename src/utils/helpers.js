@@ -57,7 +57,7 @@ export function extractStoragePathFromPublicUrl(url) {
 }
 
 export function mapDesignFileRow(row) {
-  const imageUrl = row?.file_url || row?.url || '';
+  const imageUrl = row?.file_url || '';
   return {
     id: row?.id || null,
     url: imageUrl,

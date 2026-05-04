@@ -4708,7 +4708,7 @@ export default function WorkspacePage() {
         const next = payload.new || {};
         if (projectId && String(next.project_id) !== String(projectId)) return;
         if (Number(next.sprint_number) !== Number(workspaceEffectiveViewingSprint)) return;
-        const nextUrl = next.file_url || next.url;
+        const nextUrl = next.file_url;
         if (nextUrl) {
           setDesignImage(mapDesignFileRow(next));
         }
@@ -4727,7 +4727,7 @@ export default function WorkspacePage() {
         if (projectId && String(prev.project_id) !== String(projectId)) return;
         if (Number(prev.sprint_number) !== Number(workspaceEffectiveViewingSprint)) return;
         const deletedId = prev.id ?? null;
-        const deletedUrl = String(prev.file_url || prev.url || '').trim();
+        const deletedUrl = String(prev.file_url || '').trim();
         setDesignImage((curr) => {
           if (!curr.url) return curr;
           const currUrl = String(curr.url || '').trim();
@@ -4786,16 +4786,6 @@ export default function WorkspacePage() {
       sprint_number: targetSprint,
     });
 
-    // Fallback when table uses `url` instead of `file_url`.
-    if (error && /file_url/i.test(error.message || '')) {
-      const fallback = await supabase.from('design_files').insert({
-        url: publicUrl,
-        file_name: file.name,
-        project_id: projectId || null,
-        sprint_number: targetSprint,
-      });
-      error = fallback.error;
-    }
     if (error && /project_id/i.test(error.message || '')) {
       const fallback = await supabase.from('design_files').insert({
         file_url: publicUrl,
@@ -4824,7 +4814,7 @@ export default function WorkspacePage() {
     if (projectId && sprintKey >= 1) {
       const { data: rows, error: selErr } = await supabase
         .from('design_files')
-        .select('id, file_url, url')
+        .select('id, file_url')
         .eq('project_id', projectId)
         .eq('sprint_number', sprintKey);
 
@@ -4838,7 +4828,7 @@ export default function WorkspacePage() {
 
         let storageError = null;
         for (const row of rows || []) {
-          const imageUrl = row?.file_url || row?.url || '';
+          const imageUrl = row?.file_url || '';
           const o = extractStorageObjectFromPublicUrl(imageUrl);
           const path = o.path;
           const bucket = o.bucket || 'design-bucket';
@@ -4919,12 +4909,8 @@ export default function WorkspacePage() {
       const { error } = await supabase.from('design_files').delete().eq('id', designFileId);
       dbError = error;
     } else {
-      let resp = await supabase.from('design_files').delete().eq('file_url', designImage.url);
+      const resp = await supabase.from('design_files').delete().eq('file_url', designImage.url);
       dbError = resp.error;
-      if (dbError && /file_url/i.test(dbError.message || '')) {
-        resp = await supabase.from('design_files').delete().eq('url', designImage.url);
-        dbError = resp.error;
-      }
     }
     // eslint-disable-next-line no-console
     console.log('[DeleteDesign] db delete', { designFileId, dbError });
