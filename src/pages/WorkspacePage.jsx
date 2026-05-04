@@ -4660,68 +4660,93 @@ export default function WorkspacePage() {
       ) {
         return;
       }
-      const sprintKey = Number(workspaceEffectiveViewingSprint);
-      let base = supabase
+      const sprintKey = Math.trunc(Number(workspaceEffectiveViewingSprint));
+      let query = supabase
         .from('design_files')
         .select('*')
+        .eq('sprint_number', sprintKey)
         .order('created_at', { ascending: false })
         .limit(1);
-      let query = projectId ? base.eq('project_id', projectId) : base;
-      query = query.eq('sprint_number', sprintKey);
-      let { data, error } = await query;
-      if (error && /project_id/i.test(error.message || '')) {
-        base = supabase
-          .from('design_files')
-          .select('*')
-          .order('created_at', { ascending: false })
-          .limit(1);
-        ({ data, error } = await base.eq('sprint_number', sprintKey));
+      if (projectId) {
+        query = query.eq('project_id', projectId);
       }
-      if (error) return;
+      const { data, error } = await query;
+      if (error) {
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.warn('[WorkspacePage] loadLatestDesign query failed', error);
+        }
+        setDesignImage({ id: null, url: '', storagePath: '' });
+        return;
+      }
       const row = data?.[0];
+      if (!row) {
+        setDesignImage({ id: null, url: '', storagePath: '' });
+        return;
+      }
       setDesignImage(mapDesignFileRow(row));
     }
 
     loadLatestDesign();
 
-    const channel = supabase
-      .channel(`design-files-realtime-${projectId || 'global'}`)
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'design_files' },
-        (payload) => {
-          const next = payload.new || {};
-          if (projectId && String(next.project_id) !== String(projectId)) return;
-          if (Number(next.sprint_number) !== Number(workspaceEffectiveViewingSprint)) return;
-          const nextUrl = next.file_url || next.url;
-          if (nextUrl) {
-            setDesignImage(mapDesignFileRow(next));
+    const insertFilter =
+      projectId != null && projectId !== ''
+        ? eqColumnFilter('project_id', projectId)
+        : undefined;
+    const deleteFilter = insertFilter;
+
+    const channel = supabase.channel(`design-files-realtime-${projectId || 'global'}`);
+    channel.on(
+      'postgres_changes',
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'design_files',
+        ...(insertFilter ? { filter: insertFilter } : {}),
+      },
+      (payload) => {
+        const next = payload.new || {};
+        if (projectId && String(next.project_id) !== String(projectId)) return;
+        if (Number(next.sprint_number) !== Number(workspaceEffectiveViewingSprint)) return;
+        const nextUrl = next.file_url || next.url;
+        if (nextUrl) {
+          setDesignImage(mapDesignFileRow(next));
+        }
+      },
+    );
+    channel.on(
+      'postgres_changes',
+      {
+        event: 'DELETE',
+        schema: 'public',
+        table: 'design_files',
+        ...(deleteFilter ? { filter: deleteFilter } : {}),
+      },
+      (payload) => {
+        const prev = payload.old || {};
+        if (projectId && String(prev.project_id) !== String(projectId)) return;
+        if (Number(prev.sprint_number) !== Number(workspaceEffectiveViewingSprint)) return;
+        const deletedId = prev.id ?? null;
+        const deletedUrl = String(prev.file_url || prev.url || '').trim();
+        setDesignImage((curr) => {
+          if (!curr.url) return curr;
+          const currUrl = String(curr.url || '').trim();
+          const idMatch =
+            deletedId != null && curr.id != null && String(curr.id) === String(deletedId);
+          const urlMatch = Boolean(deletedUrl && currUrl && deletedUrl === currUrl);
+          if (idMatch || urlMatch) {
+            return { id: null, url: '', storagePath: '' };
           }
-        },
-      )
-      .on(
-        'postgres_changes',
-        { event: 'DELETE', schema: 'public', table: 'design_files' },
-        (payload) => {
-          const prev = payload.old || {};
-          if (projectId && String(prev.project_id) !== String(projectId)) return;
-          if (Number(prev.sprint_number) !== Number(workspaceEffectiveViewingSprint)) return;
-          const deletedId = prev.id || null;
-          setDesignImage((curr) => {
-            if (!curr.url) return curr;
-            if (deletedId && curr.id && String(curr.id) === String(deletedId)) {
-              return { id: null, url: '', storagePath: '' };
-            }
-            return curr;
-          });
-        },
-      )
-      .subscribe();
+          return curr;
+        });
+      },
+    );
+    channel.subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [projectId, viewingSprint, workspaceCanonicalSprint]);
+  }, [projectId, viewingSprint, workspaceCanonicalSprint, workspaceEffectiveViewingSprint]);
 
   function handleSprintSelect(nextSprint) {
     setViewingSprint(Number(nextSprint));
@@ -4793,6 +4818,69 @@ export default function WorkspacePage() {
     if (!designImage.url) return;
     setUploadState({ status: 'uploading', message: '' });
 
+    const sprintKey = Math.trunc(Number(workspaceEffectiveViewingSprint));
+
+    /** Remove every design file for this sprint so an older row cannot reappear after refresh. */
+    if (projectId && sprintKey >= 1) {
+      const { data: rows, error: selErr } = await supabase
+        .from('design_files')
+        .select('id, file_url, url')
+        .eq('project_id', projectId)
+        .eq('sprint_number', sprintKey);
+
+      if (!selErr) {
+        // eslint-disable-next-line no-console
+        console.log('[DeleteDesign] bulk: sprint rows', {
+          count: (rows || []).length,
+          projectId,
+          sprintKey,
+        });
+
+        let storageError = null;
+        for (const row of rows || []) {
+          const imageUrl = row?.file_url || row?.url || '';
+          const o = extractStorageObjectFromPublicUrl(imageUrl);
+          const path = o.path;
+          const bucket = o.bucket || 'design-bucket';
+          if (path) {
+            const { error: se } = await supabase.storage.from(bucket).remove([path]);
+            if (se && !storageError) storageError = se;
+          }
+        }
+        // eslint-disable-next-line no-console
+        console.log('[DeleteDesign] storage delete (bulk)', { storageError });
+
+        const { error: dbError } = await supabase
+          .from('design_files')
+          .delete()
+          .eq('project_id', projectId)
+          .eq('sprint_number', sprintKey);
+        // eslint-disable-next-line no-console
+        console.log('[DeleteDesign] db delete (bulk)', { dbError });
+
+        if (!dbError) {
+          setDesignImage({ id: null, url: '', storagePath: '' });
+          setUploadState({
+            status: 'success',
+            message: storageError
+              ? 'Removed from project. (Storage file may need manual cleanup.)'
+              : 'Image deleted.',
+          });
+          setTimeout(() => setUploadState({ status: 'idle', message: '' }), 1800);
+          return;
+        }
+
+        setUploadState({
+          status: 'error',
+          message: dbError?.message || 'Delete failed.',
+        });
+        return;
+      }
+
+      // eslint-disable-next-line no-console
+      console.warn('[DeleteDesign] bulk list failed; falling back to single-row delete', selErr);
+    }
+
     const fromUrl = extractStorageObjectFromPublicUrl(designImage.url);
     const storagePath =
       (typeof designImage.storagePath === 'string' && designImage.storagePath.trim()) ||
@@ -4802,7 +4890,7 @@ export default function WorkspacePage() {
     const designFileId = designImage.id ?? null;
 
     // eslint-disable-next-line no-console
-    console.log('[DeleteDesign] inputs', {
+    console.log('[DeleteDesign] inputs (single)', {
       designFileId,
       url: designImage.url,
       storagePathFromState: designImage.storagePath,
