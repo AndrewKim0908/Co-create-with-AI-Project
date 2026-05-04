@@ -1302,6 +1302,8 @@ function ChatPanel({
   senderRole = 'engineer',
   width = 220,
   viewingSprintNumber,
+  /** Raw timeline selection; included in deps so chat reloads when it changes even if the resolved sprint number matches the previous render. */
+  viewingSprintTimeline = null,
   currentSprintNumber,
 }) {
   const { t, lang } = useLang();
@@ -1314,6 +1316,7 @@ function ChatPanel({
   const [currentUserEmail, setCurrentUserEmail] = useState('');
   const [currentUserFullName, setCurrentUserFullName] = useState('');
   const scrollRef = useRef(null);
+  const messagesLoadGenerationRef = useRef(0);
 
   function getAvatarInitials(displayName, email) {
     const name = String(displayName || '').trim();
@@ -1344,10 +1347,11 @@ function ChatPanel({
 
   useEffect(() => {
     const viewSn = normalizeMessagesSprintNumber(viewingSprintNumber);
+    setMessages([]);
+    const loadGen = ++messagesLoadGenerationRef.current;
 
     async function loadMessages() {
       if (!projectId || viewSn == null) {
-        setMessages([]);
         return;
       }
 
@@ -1484,9 +1488,11 @@ function ChatPanel({
       }
 
       if (error) {
+        if (messagesLoadGenerationRef.current !== loadGen) return;
         setSendState({ status: 'error', message: error.message || 'Failed to load messages.' });
         return;
       }
+      if (messagesLoadGenerationRef.current !== loadGen) return;
       setMessages(data || []);
     }
 
@@ -1514,7 +1520,7 @@ function ChatPanel({
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [projectId, viewingSprintNumber]);
+  }, [projectId, viewingSprintNumber, viewingSprintTimeline]);
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -4612,6 +4618,7 @@ export default function WorkspacePage() {
     }
 
     await updateProjectFields({ sprint_number: nextSprint });
+    setViewingSprint(nextSprint);
   }
 
   async function confirmDeleteSprint() {
@@ -5072,10 +5079,12 @@ export default function WorkspacePage() {
         />
 
         <ChatPanel
+          key={`chat-${projectId}-${viewingSprint}`}
           width={chatWidth}
           projectId={projectId}
           senderRole="engineer"
           viewingSprintNumber={workspaceEffectiveViewingSprint}
+          viewingSprintTimeline={viewingSprint}
           currentSprintNumber={workspaceCanonicalSprint}
         />
 
