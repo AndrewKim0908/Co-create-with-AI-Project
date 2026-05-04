@@ -1,11 +1,15 @@
 /**
  * Google Gemini — sprint conflict analysis.
  * Uses VITE_GEMINI_API_KEY. Image fetch failures are skipped (text-only).
+ *
+ * REST shape follows Google AI Gemini docs — generateContent is invoked on **v1beta**
+ * (many model IDs are not registered on `v1`, which yields 404 / “not supported”).
+ * Stable model id: https://ai.google.dev/gemini-api/docs/models/gemini-2.5-flash
  */
 
-const GEMINI_MODEL = 'gemini-pro';
+const GEMINI_MODEL = 'gemini-2.5-flash';
 
-const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1/models/${GEMINI_MODEL}:generateContent`;
+const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 function arrayBufferToBase64(buffer) {
   let binary = '';
