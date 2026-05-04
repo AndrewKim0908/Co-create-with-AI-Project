@@ -4758,6 +4758,47 @@ export default function WorkspacePage() {
     if (!file) return;
 
     setUploadState({ status: 'uploading', message: '' });
+
+    const targetSprint = Number.isFinite(Number(workspaceEffectiveViewingSprint)) &&
+      workspaceEffectiveViewingSprint >= 1
+      ? Number(workspaceEffectiveViewingSprint)
+      : Number(projectMeta?.sprint_number ?? fallbackProject.sprint ?? 0);
+
+    if (projectId && Number.isFinite(targetSprint) && targetSprint >= 1) {
+      const { data: existingRows, error: selErr } = await supabase
+        .from('design_files')
+        .select('id, file_url')
+        .eq('project_id', projectId)
+        .eq('sprint_number', targetSprint);
+
+      if (selErr) {
+        setUploadState({ status: 'error', message: selErr.message || 'Could not prepare upload.' });
+        return;
+      }
+
+      for (const row of existingRows || []) {
+        const imageUrl = row?.file_url || '';
+        const o = extractStorageObjectFromPublicUrl(imageUrl);
+        if (o.path) {
+          await supabase.storage.from(o.bucket || 'design-bucket').remove([o.path]);
+        }
+      }
+
+      const { error: delErr } = await supabase
+        .from('design_files')
+        .delete()
+        .eq('project_id', projectId)
+        .eq('sprint_number', targetSprint);
+
+      if (delErr) {
+        setUploadState({
+          status: 'error',
+          message: delErr.message || 'Could not replace the previous design.',
+        });
+        return;
+      }
+    }
+
     const filePath = `${projectId || 'global'}/${Date.now()}-${file.name}`;
     const { error: uploadError } = await supabase.storage
       .from('design-bucket')
@@ -4775,10 +4816,6 @@ export default function WorkspacePage() {
       return;
     }
 
-    const targetSprint = Number.isFinite(Number(workspaceEffectiveViewingSprint)) &&
-      workspaceEffectiveViewingSprint >= 1
-      ? Number(workspaceEffectiveViewingSprint)
-      : Number(projectMeta?.sprint_number ?? fallbackProject.sprint ?? 0);
     let { error } = await supabase.from('design_files').insert({
       file_url: publicUrl,
       file_name: file.name,
