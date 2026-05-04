@@ -4408,9 +4408,22 @@ export default function WorkspacePage() {
 
   useEffect(() => {
     if (!projectId) return;
-    const current = Number(projectMeta?.sprint_number ?? fallbackProject.sprint ?? 0);
+    const current = Math.trunc(Number(projectMeta?.sprint_number ?? fallbackProject.sprint ?? 0));
     if (!Number.isFinite(current) || current < 1) return;
-    setViewingSprint(current);
+
+    setViewingSprint((prev) => {
+      if (prev == null || prev === '') {
+        return current;
+      }
+      const pv = Math.trunc(Number(prev));
+      if (!Number.isFinite(pv) || pv < 1) {
+        return current;
+      }
+      if (pv > current) {
+        return current;
+      }
+      return prev;
+    });
   }, [projectId, projectMeta?.sprint_number, fallbackProject.sprint]);
 
   useEffect(() => {
@@ -4575,7 +4588,7 @@ export default function WorkspacePage() {
       return;
     }
 
-    const previousSprint = currentSprint - 1;
+    const previousSprint = sprintToDelete - 1;
     // eslint-disable-next-line no-console
     console.log('[DeleteSprint] start', {
       projectId,
@@ -4585,8 +4598,11 @@ export default function WorkspacePage() {
       previousSprint,
     });
 
-    setDeleteSprintTarget(null);
     setViewingSprint(previousSprint);
+    setDeleteSprintTarget(null);
+    setProjectMeta((prev) =>
+      prev && typeof prev === 'object' ? { ...prev, sprint_number: previousSprint } : prev,
+    );
     setDesignImage({ id: null, url: '', storagePath: '' });
 
     const { error: msgError } = await supabase
