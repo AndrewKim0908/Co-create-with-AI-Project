@@ -42,7 +42,7 @@ const Sidebar = ({ active, onNav, user }) => {
       <div style={{ margin: '10px 10px 4px', padding: '8px 10px', background: 'rgba(30,138,90,0.12)', borderRadius: 4, border: '1px solid rgba(30,138,90,0.25)' }}>
         <div style={{ fontSize: 9, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'rgba(255,255,255,0.4)', marginBottom: 3 }}>{t(lang,'activeSprint')}</div>
         <div style={{ fontSize: 11, fontWeight: 600, color: '#fff' }}>EV Thermal Module A</div>
-        <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.45)', marginTop: 2 }}>Sprint #14 · 3 {t(lang,'conflictsOpen')}</div>
+        <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.45)', marginTop: 2 }}>{t(lang, 'sidebarActiveSprintMeta')}</div>
         <div style={{ marginTop: 6, height: 3, background: 'rgba(255,255,255,0.1)', borderRadius: 2 }}>
           <div style={{ height: 3, width: '67%', background: C.emerald, borderRadius: 2 }}></div>
         </div>

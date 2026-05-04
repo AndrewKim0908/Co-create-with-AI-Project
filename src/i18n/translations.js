@@ -45,6 +45,7 @@ export const TRANSLATIONS = {
     logout: 'Log out',
     activeSprint: 'Active Sprint',
     conflictsOpen: 'conflicts open',
+    sidebarActiveSprintMeta: 'See Hub for sprint and open conflicts',
 
     // Topbar
     back: 'Back',
@@ -254,7 +255,7 @@ export const TRANSLATIONS = {
     radarCost: 'Cost', radarPerf: 'Performance', radarDura: 'Durability', radarMfg: 'Mfg', radarTime: 'Timeline', radarSafe: 'Safety',
 
     // Chat messages
-    chatSys1: 'Sprint #14 · CF-01 activated. 3 stakeholders assigned.',
+    chatNoMessagesYet: 'No messages yet.',
     chatDeadlock: 'Deadlock detected — positions unchanged after 3 exchanges. Initiating AI mediation.',
     chatMsg1: 'I reviewed the thermal clearance. We need ±0.3mm max — anything above that risks vibration fatigue at the mounting points.',
     chatMsg2: 'We tested both extremes in the last cycle. The ±0.5mm gives us manufacturing flexibility we actually need. ±0.3 would add 2 weeks to the production ramp.',
@@ -345,6 +346,7 @@ export const TRANSLATIONS = {
     logout: '로그아웃',
     activeSprint: '진행 중인 스프린트',
     conflictsOpen: '건 충돌 진행 중',
+    sidebarActiveSprintMeta: '스프린트·충돌 현황은 허브에서 확인하세요',
     back: '뒤로',
     backToHub: '허브로 돌아가기',
     liveSession: '실시간 세션',
@@ -541,7 +543,7 @@ export const TRANSLATIONS = {
     consensusEditMemo: '합의 메모 편집',
     rejectBtn: '제안 거부',
     radarCost: '비용', radarPerf: '성능', radarDura: '내구성', radarMfg: '제조성', radarTime: '일정', radarSafe: '안전성',
-    chatSys1: '스프린트 #14 · CF-01 활성화됨. 이해관계자 3명 배정.',
+    chatNoMessagesYet: '아직 메시지가 없습니다.',
     chatDeadlock: '교착 상태 감지 — 3회 교환 후 입장 변화 없음. AI 중재 시작.',
     chatMsg1: '열 간격을 검토했습니다. 최대 ±0.3mm가 필요합니다 — 그 이상이면 마운팅 포인트에서 진동 피로 위험이 있습니다.',
     chatMsg2: '저번 사이클에서 양쪽 극단을 테스트했습니다. ±0.5mm는 실제로 필요한 제조 유연성을 제공합니다. ±0.3은 생산 준비에 2주를 추가합니다.',
@@ -630,6 +632,7 @@ export const TRANSLATIONS = {
     logout: '退出登录',
     activeSprint: '活跃冲刺',
     conflictsOpen: '个冲突进行中',
+    sidebarActiveSprintMeta: '在中心查看冲刺与冲突概况',
     back: '返回',
     backToHub: '返回中心',
     liveSession: '实时会话',
@@ -824,7 +827,7 @@ export const TRANSLATIONS = {
     consensusEditMemo: '编辑共识备注',
     rejectBtn: '拒绝提案',
     radarCost: '成本', radarPerf: '性能', radarDura: '耐久性', radarMfg: '可制造性', radarTime: '工期', radarSafe: '安全性',
-    chatSys1: '冲刺 #14 · CF-01 已激活。已分配3名利益相关者。',
+    chatNoMessagesYet: '暂无消息。',
     chatDeadlock: '检测到僵局——3次交换后立场未变。启动AI调解。',
     chatMsg1: '我检查了热间隙。我们需要最大 ±0.3mm——超过这个值会有安装点振动疲劳风险。',
     chatMsg2: '上个周期我们测试了两个极端。±0.5mm 提供了我们实际需要的制造灵活性。±0.3 会在生产准备上增加2周时间。',

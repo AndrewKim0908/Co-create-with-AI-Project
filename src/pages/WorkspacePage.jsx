@@ -1746,7 +1746,7 @@ function ChatPanel({
       >
         {messages.length === 0 ? (
           <div style={{ textAlign: 'center', fontSize: 10, color: C.fg4, padding: '8px 0' }}>
-            {t('chatSys1')}
+            {t('chatNoMessagesYet')}
           </div>
         ) : messages.map((msg) => {
           const senderEmail = msg.sender_email || '';
