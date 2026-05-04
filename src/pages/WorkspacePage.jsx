@@ -1346,145 +1346,61 @@ function ChatPanel({
   }, []);
 
   useEffect(() => {
-    const viewSn = normalizeMessagesSprintNumber(viewingSprintNumber);
-    setMessages([]);
     const loadGen = ++messagesLoadGenerationRef.current;
 
-    async function loadMessages() {
-      if (!projectId || viewSn == null) {
-        return;
-      }
+    if (
+      !projectId ||
+      viewingSprintNumber === null ||
+      viewingSprintNumber === undefined
+    ) {
+      setMessages([]);
+      return () => {};
+    }
 
-      async function loadSprintScoped() {
-        let base = supabase
+    const viewSn = normalizeMessagesSprintNumber(viewingSprintNumber);
+    if (viewSn == null) {
+      setMessages([]);
+      return () => {};
+    }
+
+    setMessages([]);
+
+    async function loadMessages() {
+      // eslint-disable-next-line no-console
+      console.log('[ChatPanel] loadMessages viewingSprintNumber', viewingSprintNumber, {
+        normalizedSprintForQuery: viewSn,
+        projectId,
+      });
+
+      let { data, error } = await supabase
+        .from('messages')
+        .select('*')
+        .eq('project_id', projectId)
+        .eq('sprint_number', viewSn)
+        .order('created_at', { ascending: true })
+        .limit(200);
+
+      if (error && /sender_name/i.test(error.message || '')) {
+        ({ data, error } = await supabase
           .from('messages')
           .select(
-            'id, content, sender_role, sender_name, sender_email, created_at, project_id, sprint_number',
+            'id, content, sender_role, sender_email, created_at, project_id, sprint_number',
           )
+          .eq('project_id', projectId)
+          .eq('sprint_number', viewSn)
           .order('created_at', { ascending: true })
-          .limit(200);
-
-        let query = base.eq('project_id', projectId).eq('sprint_number', viewSn);
-        let { data, error } = await query;
-
-        if (error && /sender_name/i.test(error.message || '')) {
-          base = supabase
-            .from('messages')
-            .select('id, content, sender_role, sender_email, created_at, project_id, sprint_number')
-            .order('created_at', { ascending: true })
-            .limit(200);
-          query = base.eq('project_id', projectId).eq('sprint_number', viewSn);
-          ({ data, error } = await query);
-        }
-
-        if (error && /sender_email/i.test(error.message || '')) {
-          base = supabase
-            .from('messages')
-            .select('id, content, sender_role, sender_name, created_at, project_id, sprint_number')
-            .order('created_at', { ascending: true })
-            .limit(200);
-          query = base.eq('project_id', projectId).eq('sprint_number', viewSn);
-          ({ data, error } = await query);
-        }
-        if (error && /project_id/i.test(error.message || '')) {
-          base = supabase
-            .from('messages')
-            .select('id, content, sender_role, sender_name, sender_email, created_at, sprint_number')
-            .order('created_at', { ascending: true })
-            .limit(200);
-          ({ data, error } = await base.eq('sprint_number', viewSn));
-        }
-        if (error && /sender_name/i.test(error.message || '')) {
-          base = supabase
-            .from('messages')
-            .select('id, content, sender_role, sender_email, created_at, sprint_number')
-            .order('created_at', { ascending: true })
-            .limit(200);
-          ({ data, error } = await base.eq('sprint_number', viewSn));
-        }
-        if (error && /sender_email/i.test(error.message || '')) {
-          base = supabase
-            .from('messages')
-            .select('id, content, sender_role, sender_name, created_at, sprint_number')
-            .order('created_at', { ascending: true })
-            .limit(200);
-          ({ data, error } = await base.eq('sprint_number', viewSn));
-        }
-        if (error && /sender_name/i.test(error.message || '')) {
-          base = supabase
-            .from('messages')
-            .select('id, content, sender_role, created_at, sprint_number')
-            .order('created_at', { ascending: true })
-            .limit(200);
-          ({ data, error } = await base.eq('sprint_number', viewSn));
-        }
-
-        return { data, error };
+          .limit(200));
       }
-
-      let { data, error } = await loadSprintScoped();
-
-      if (error && /sprint_number/i.test(error.message || '')) {
-        let base = supabase
+      if (error && /sender_email/i.test(error.message || '')) {
+        ({ data, error } = await supabase
           .from('messages')
-          .select('id, content, sender_role, sender_name, sender_email, created_at, project_id')
+          .select(
+            'id, content, sender_role, sender_name, created_at, project_id, sprint_number',
+          )
+          .eq('project_id', projectId)
+          .eq('sprint_number', viewSn)
           .order('created_at', { ascending: true })
-          .limit(200);
-
-        let query = base.eq('project_id', projectId);
-        ({ data, error } = await query);
-
-        if (error && /sender_name/i.test(error.message || '')) {
-          base = supabase
-            .from('messages')
-            .select('id, content, sender_role, sender_email, created_at, project_id')
-            .order('created_at', { ascending: true })
-            .limit(200);
-          query = base.eq('project_id', projectId);
-          ({ data, error } = await query);
-        }
-
-        if (error && /sender_email/i.test(error.message || '')) {
-          base = supabase
-            .from('messages')
-            .select('id, content, sender_role, sender_name, created_at, project_id')
-            .order('created_at', { ascending: true })
-            .limit(200);
-          query = base.eq('project_id', projectId);
-          ({ data, error } = await query);
-        }
-        if (error && /project_id/i.test(error.message || '')) {
-          base = supabase
-            .from('messages')
-            .select('id, content, sender_role, sender_name, sender_email, created_at')
-            .order('created_at', { ascending: true })
-            .limit(200);
-          ({ data, error } = await base);
-        }
-        if (error && /sender_name/i.test(error.message || '')) {
-          base = supabase
-            .from('messages')
-            .select('id, content, sender_role, sender_email, created_at')
-            .order('created_at', { ascending: true })
-            .limit(200);
-          ({ data, error } = await base);
-        }
-        if (error && /sender_email/i.test(error.message || '')) {
-          base = supabase
-            .from('messages')
-            .select('id, content, sender_role, sender_name, created_at')
-            .order('created_at', { ascending: true })
-            .limit(200);
-          ({ data, error } = await base);
-        }
-        if (error && /sender_name/i.test(error.message || '')) {
-          base = supabase
-            .from('messages')
-            .select('id, content, sender_role, created_at')
-            .order('created_at', { ascending: true })
-            .limit(200);
-          ({ data, error } = await base);
-        }
+          .limit(200));
       }
 
       if (error) {
@@ -1493,14 +1409,14 @@ function ChatPanel({
         return;
       }
       if (messagesLoadGenerationRef.current !== loadGen) return;
-      setMessages(data || []);
+      const rows = data || [];
+      const filtered = rows.filter(
+        (row) => normalizeMessagesSprintNumber(row?.sprint_number) === viewSn,
+      );
+      setMessages(filtered);
     }
 
     loadMessages();
-
-    if (!projectId || viewSn == null) {
-      return () => {};
-    }
 
     const channel = supabase
       .channel(`messages-realtime-${projectId || 'global'}-${viewSn}`)
