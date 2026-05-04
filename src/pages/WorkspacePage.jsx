@@ -4538,67 +4538,96 @@ export default function WorkspacePage() {
   }
 
   async function confirmDeleteSprint() {
-    const sprintToDelete = Number(deleteSprintTarget);
-    const currentSprint = Number(projectMeta?.sprint_number ?? fallbackProject.sprint ?? 0);
-    if (!projectId || !Number.isFinite(sprintToDelete)) return;
-    if (sprintToDelete !== currentSprint || currentSprint <= 1) {
+    if (deleteSprintTarget === null || deleteSprintTarget === undefined) {
+      // eslint-disable-next-line no-console
+      console.log('[DeleteSprint] aborted: deleteSprintTarget is null or undefined');
+      return;
+    }
+
+    const sprintToDelete = Math.trunc(Number(deleteSprintTarget));
+    const currentSprint = Math.trunc(
+      Number(projectMeta?.sprint_number ?? fallbackProject.sprint ?? 0),
+    );
+
+    if (!projectId) {
+      // eslint-disable-next-line no-console
+      console.log('[DeleteSprint] aborted: missing projectId', { sprintToDelete });
+      return;
+    }
+
+    if (!Number.isFinite(sprintToDelete) || sprintToDelete < 1) {
+      // eslint-disable-next-line no-console
+      console.log('[DeleteSprint] aborted: invalid sprintToDelete', {
+        deleteSprintTarget,
+        sprintToDelete,
+      });
       setDeleteSprintTarget(null);
       return;
     }
+
+    if (sprintToDelete !== currentSprint || currentSprint <= 1) {
+      // eslint-disable-next-line no-console
+      console.log('[DeleteSprint] aborted: not current sprint or sprint 1', {
+        sprintToDelete,
+        currentSprint,
+      });
+      setDeleteSprintTarget(null);
+      return;
+    }
+
     const previousSprint = currentSprint - 1;
+    // eslint-disable-next-line no-console
+    console.log('[DeleteSprint] start', {
+      projectId,
+      deleteSprintTarget,
+      sprintToDelete,
+      currentSprint,
+      previousSprint,
+    });
+
     setDeleteSprintTarget(null);
     setViewingSprint(previousSprint);
     setDesignImage({ id: null, url: '', storagePath: '' });
 
-    const { error: deleteMessagesError } = await supabase
+    const { error: msgError } = await supabase
       .from('messages')
       .delete()
       .eq('project_id', projectId)
       .eq('sprint_number', sprintToDelete);
-    if (deleteMessagesError) {
-      // eslint-disable-next-line no-console
-      console.error('[WorkspacePage] delete sprint messages failed', deleteMessagesError);
-    }
+    // eslint-disable-next-line no-console
+    console.log('[DeleteSprint] messages delete', { sprintToDelete, msgError });
 
-    const { error: deleteVotesError } = await supabase
+    const { error: votesError } = await supabase
       .from('sprint_votes')
       .delete()
       .eq('project_id', projectId)
       .eq('sprint_number', sprintToDelete);
-    if (deleteVotesError) {
-      // eslint-disable-next-line no-console
-      console.error('[WorkspacePage] delete sprint sprint_votes failed', deleteVotesError);
-    }
+    // eslint-disable-next-line no-console
+    console.log('[DeleteSprint] sprint_votes delete', { sprintToDelete, votesError });
 
-    const { error: deleteMarkerError } = await supabase
+    const { error: markersError } = await supabase
       .from('markers')
       .delete()
       .eq('project_id', projectId)
       .eq('sprint_number', sprintToDelete);
-    if (deleteMarkerError) {
-      // eslint-disable-next-line no-console
-      console.error('[WorkspacePage] delete sprint markers failed', deleteMarkerError);
-    }
+    // eslint-disable-next-line no-console
+    console.log('[DeleteSprint] markers delete', { sprintToDelete, markersError });
 
-    const { error: deleteDesignError } = await supabase
+    const { error: filesError } = await supabase
       .from('design_files')
       .delete()
       .eq('project_id', projectId)
       .eq('sprint_number', sprintToDelete);
-    if (deleteDesignError) {
-      // eslint-disable-next-line no-console
-      console.error('[WorkspacePage] delete sprint design_files failed', deleteDesignError);
-    }
+    // eslint-disable-next-line no-console
+    console.log('[DeleteSprint] design_files delete', { sprintToDelete, filesError });
 
-    const { error: deleteAiAnalysisError } = await supabase
+    const { error: aiError } = await supabase
       .from('sprint_ai_analysis')
       .delete()
       .eq('project_id', projectId)
       .eq('sprint_number', sprintToDelete);
-    if (deleteAiAnalysisError) {
-      // eslint-disable-next-line no-console
-      console.error('[WorkspacePage] delete sprint sprint_ai_analysis failed', deleteAiAnalysisError);
-    }
+    // eslint-disable-next-line no-console
+    console.log('[DeleteSprint] sprint_ai_analysis delete', { sprintToDelete, aiError });
 
     await updateProjectFields({ sprint_number: previousSprint });
   }
