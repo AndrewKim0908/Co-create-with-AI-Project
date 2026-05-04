@@ -293,7 +293,6 @@ export async function requestGeminiAnalysis({
       generationConfig: {
         temperature: 0.35,
         maxOutputTokens: 8192,
-        responseMimeType: 'application/json',
       },
     }),
   });
