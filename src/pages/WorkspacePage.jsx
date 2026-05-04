@@ -1290,8 +1290,20 @@ function BlueprintViewer({
   );
 }
 
+/** Integer sprint ≥ 1 for messages queries; otherwise null. */
+function normalizeMessagesSprintNumber(n) {
+  const v = Number(n);
+  return Number.isFinite(v) && v >= 1 ? Math.trunc(v) : null;
+}
+
 // ─── Chat panel ──────────────────────────────────────────────
-function ChatPanel({ projectId, senderRole = 'engineer', width = 220 }) {
+function ChatPanel({
+  projectId,
+  senderRole = 'engineer',
+  width = 220,
+  viewingSprintNumber,
+  currentSprintNumber,
+}) {
   const { t, lang } = useLang();
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState([]);
@@ -1331,68 +1343,144 @@ function ChatPanel({ projectId, senderRole = 'engineer', width = 220 }) {
   }, []);
 
   useEffect(() => {
+    const viewSn = normalizeMessagesSprintNumber(viewingSprintNumber);
+
     async function loadMessages() {
-      let base = supabase
-        .from('messages')
-        .select('id, content, sender_role, sender_name, sender_email, created_at, project_id')
-        .order('created_at', { ascending: true })
-        .limit(200);
+      if (!projectId || viewSn == null) {
+        setMessages([]);
+        return;
+      }
 
-      let query = projectId ? base.eq('project_id', projectId) : base;
-      let { data, error } = await query;
-
-      // Fallback: table without sender_name column.
-      if (error && /sender_name/i.test(error.message || '')) {
-        base = supabase
+      async function loadSprintScoped() {
+        let base = supabase
           .from('messages')
-          .select('id, content, sender_role, sender_email, created_at, project_id')
+          .select(
+            'id, content, sender_role, sender_name, sender_email, created_at, project_id, sprint_number',
+          )
           .order('created_at', { ascending: true })
           .limit(200);
-        query = projectId ? base.eq('project_id', projectId) : base;
+
+        let query = base.eq('project_id', projectId).eq('sprint_number', viewSn);
+        let { data, error } = await query;
+
+        if (error && /sender_name/i.test(error.message || '')) {
+          base = supabase
+            .from('messages')
+            .select('id, content, sender_role, sender_email, created_at, project_id, sprint_number')
+            .order('created_at', { ascending: true })
+            .limit(200);
+          query = base.eq('project_id', projectId).eq('sprint_number', viewSn);
+          ({ data, error } = await query);
+        }
+
+        if (error && /sender_email/i.test(error.message || '')) {
+          base = supabase
+            .from('messages')
+            .select('id, content, sender_role, sender_name, created_at, project_id, sprint_number')
+            .order('created_at', { ascending: true })
+            .limit(200);
+          query = base.eq('project_id', projectId).eq('sprint_number', viewSn);
+          ({ data, error } = await query);
+        }
+        if (error && /project_id/i.test(error.message || '')) {
+          base = supabase
+            .from('messages')
+            .select('id, content, sender_role, sender_name, sender_email, created_at, sprint_number')
+            .order('created_at', { ascending: true })
+            .limit(200);
+          ({ data, error } = await base.eq('sprint_number', viewSn));
+        }
+        if (error && /sender_name/i.test(error.message || '')) {
+          base = supabase
+            .from('messages')
+            .select('id, content, sender_role, sender_email, created_at, sprint_number')
+            .order('created_at', { ascending: true })
+            .limit(200);
+          ({ data, error } = await base.eq('sprint_number', viewSn));
+        }
+        if (error && /sender_email/i.test(error.message || '')) {
+          base = supabase
+            .from('messages')
+            .select('id, content, sender_role, sender_name, created_at, sprint_number')
+            .order('created_at', { ascending: true })
+            .limit(200);
+          ({ data, error } = await base.eq('sprint_number', viewSn));
+        }
+        if (error && /sender_name/i.test(error.message || '')) {
+          base = supabase
+            .from('messages')
+            .select('id, content, sender_role, created_at, sprint_number')
+            .order('created_at', { ascending: true })
+            .limit(200);
+          ({ data, error } = await base.eq('sprint_number', viewSn));
+        }
+
+        return { data, error };
+      }
+
+      let { data, error } = await loadSprintScoped();
+
+      if (error && /sprint_number/i.test(error.message || '')) {
+        let base = supabase
+          .from('messages')
+          .select('id, content, sender_role, sender_name, sender_email, created_at, project_id')
+          .order('created_at', { ascending: true })
+          .limit(200);
+
+        let query = base.eq('project_id', projectId);
         ({ data, error } = await query);
-      }
 
-      // Fallback: table without sender_email/project_id columns.
-      if (error && /sender_email/i.test(error.message || '')) {
-        base = supabase
-          .from('messages')
-          .select('id, content, sender_role, sender_name, created_at, project_id')
-          .order('created_at', { ascending: true })
-          .limit(200);
-        query = projectId ? base.eq('project_id', projectId) : base;
-        ({ data, error } = await query);
-      }
-      if (error && /project_id/i.test(error.message || '')) {
-        base = supabase
-          .from('messages')
-          .select('id, content, sender_role, sender_name, sender_email, created_at')
-          .order('created_at', { ascending: true })
-          .limit(200);
-        ({ data, error } = await base);
-      }
-      if (error && /sender_name/i.test(error.message || '')) {
-        base = supabase
-          .from('messages')
-          .select('id, content, sender_role, sender_email, created_at')
-          .order('created_at', { ascending: true })
-          .limit(200);
-        ({ data, error } = await base);
-      }
-      if (error && /sender_email/i.test(error.message || '')) {
-        base = supabase
-          .from('messages')
-          .select('id, content, sender_role, sender_name, created_at')
-          .order('created_at', { ascending: true })
-          .limit(200);
-        ({ data, error } = await base);
-      }
-      if (error && /sender_name/i.test(error.message || '')) {
-        base = supabase
-          .from('messages')
-          .select('id, content, sender_role, created_at')
-          .order('created_at', { ascending: true })
-          .limit(200);
-        ({ data, error } = await base);
+        if (error && /sender_name/i.test(error.message || '')) {
+          base = supabase
+            .from('messages')
+            .select('id, content, sender_role, sender_email, created_at, project_id')
+            .order('created_at', { ascending: true })
+            .limit(200);
+          query = base.eq('project_id', projectId);
+          ({ data, error } = await query);
+        }
+
+        if (error && /sender_email/i.test(error.message || '')) {
+          base = supabase
+            .from('messages')
+            .select('id, content, sender_role, sender_name, created_at, project_id')
+            .order('created_at', { ascending: true })
+            .limit(200);
+          query = base.eq('project_id', projectId);
+          ({ data, error } = await query);
+        }
+        if (error && /project_id/i.test(error.message || '')) {
+          base = supabase
+            .from('messages')
+            .select('id, content, sender_role, sender_name, sender_email, created_at')
+            .order('created_at', { ascending: true })
+            .limit(200);
+          ({ data, error } = await base);
+        }
+        if (error && /sender_name/i.test(error.message || '')) {
+          base = supabase
+            .from('messages')
+            .select('id, content, sender_role, sender_email, created_at')
+            .order('created_at', { ascending: true })
+            .limit(200);
+          ({ data, error } = await base);
+        }
+        if (error && /sender_email/i.test(error.message || '')) {
+          base = supabase
+            .from('messages')
+            .select('id, content, sender_role, sender_name, created_at')
+            .order('created_at', { ascending: true })
+            .limit(200);
+          ({ data, error } = await base);
+        }
+        if (error && /sender_name/i.test(error.message || '')) {
+          base = supabase
+            .from('messages')
+            .select('id, content, sender_role, created_at')
+            .order('created_at', { ascending: true })
+            .limit(200);
+          ({ data, error } = await base);
+        }
       }
 
       if (error) {
@@ -1404,14 +1492,20 @@ function ChatPanel({ projectId, senderRole = 'engineer', width = 220 }) {
 
     loadMessages();
 
+    if (!projectId || viewSn == null) {
+      return () => {};
+    }
+
     const channel = supabase
-      .channel(`messages-realtime-${projectId || 'global'}`)
+      .channel(`messages-realtime-${projectId || 'global'}-${viewSn}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages' },
         (payload) => {
           const next = payload.new || {};
-          if (projectId && String(next.project_id) !== String(projectId)) return;
+          if (String(next.project_id) !== String(projectId)) return;
+          const rowSn = normalizeMessagesSprintNumber(next.sprint_number);
+          if (rowSn !== viewSn) return;
           setMessages((prev) => [...prev, next]);
         },
       )
@@ -1420,7 +1514,7 @@ function ChatPanel({ projectId, senderRole = 'engineer', width = 220 }) {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [projectId]);
+  }, [projectId, viewingSprintNumber]);
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -1430,6 +1524,8 @@ function ChatPanel({ projectId, senderRole = 'engineer', width = 220 }) {
     const content = input.trim();
     if (!content) return;
 
+    const messageSprint = normalizeMessagesSprintNumber(currentSprintNumber) ?? 1;
+
     setSendState({ status: 'sending', message: '' });
 
     let { error } = await supabase.from('messages').insert({
@@ -1438,6 +1534,7 @@ function ChatPanel({ projectId, senderRole = 'engineer', width = 220 }) {
       sender_name: currentUserFullName || null,
       sender_email: currentUserEmail || null,
       project_id: projectId || null,
+      sprint_number: messageSprint,
     });
 
     // Fallback when sender_name column doesn't exist.
@@ -1447,6 +1544,7 @@ function ChatPanel({ projectId, senderRole = 'engineer', width = 220 }) {
         sender_role: senderRole,
         sender_email: currentUserEmail || null,
         project_id: projectId || null,
+        sprint_number: messageSprint,
       });
       error = fallback.error;
     }
@@ -1458,6 +1556,7 @@ function ChatPanel({ projectId, senderRole = 'engineer', width = 220 }) {
         sender_role: senderRole,
         sender_name: currentUserFullName || null,
         sender_email: currentUserEmail || null,
+        sprint_number: messageSprint,
       });
       error = fallback.error;
     }
@@ -1466,6 +1565,7 @@ function ChatPanel({ projectId, senderRole = 'engineer', width = 220 }) {
         content,
         sender_role: senderRole,
         sender_email: currentUserEmail || null,
+        sprint_number: messageSprint,
       });
       error = fallback.error;
     }
@@ -1476,6 +1576,7 @@ function ChatPanel({ projectId, senderRole = 'engineer', width = 220 }) {
         sender_role: senderRole,
         sender_name: currentUserFullName || null,
         project_id: projectId || null,
+        sprint_number: messageSprint,
       });
       error = fallback.error;
       if (error && /sender_name/i.test(error.message || '')) {
@@ -1483,6 +1584,7 @@ function ChatPanel({ projectId, senderRole = 'engineer', width = 220 }) {
           content,
           sender_role: senderRole,
           project_id: projectId || null,
+          sprint_number: messageSprint,
         });
         error = fallback.error;
       }
@@ -1491,14 +1593,85 @@ function ChatPanel({ projectId, senderRole = 'engineer', width = 220 }) {
           content,
           sender_role: senderRole,
           sender_name: currentUserFullName || null,
+          sprint_number: messageSprint,
         });
         error = fallback.error;
         if (error && /sender_name/i.test(error.message || '')) {
           fallback = await supabase.from('messages').insert({
             content,
             sender_role: senderRole,
+            sprint_number: messageSprint,
           });
           error = fallback.error;
+        }
+      }
+    }
+
+    if (error && /sprint_number/i.test(error.message || '')) {
+      const fallback = await supabase.from('messages').insert({
+        content,
+        sender_role: senderRole,
+        sender_name: currentUserFullName || null,
+        sender_email: currentUserEmail || null,
+        project_id: projectId || null,
+      });
+      error = fallback.error;
+      if (error && /sender_name/i.test(error.message || '')) {
+        const fb2 = await supabase.from('messages').insert({
+          content,
+          sender_role: senderRole,
+          sender_email: currentUserEmail || null,
+          project_id: projectId || null,
+        });
+        error = fb2.error;
+      }
+      if (error && /project_id/i.test(error.message || '')) {
+        const fb3 = await supabase.from('messages').insert({
+          content,
+          sender_role: senderRole,
+          sender_name: currentUserFullName || null,
+          sender_email: currentUserEmail || null,
+        });
+        error = fb3.error;
+      }
+      if (error && /sender_name/i.test(error.message || '')) {
+        const fb4 = await supabase.from('messages').insert({
+          content,
+          sender_role: senderRole,
+          sender_email: currentUserEmail || null,
+        });
+        error = fb4.error;
+      }
+      if (error && /sender_email/i.test(error.message || '')) {
+        let fb5 = await supabase.from('messages').insert({
+          content,
+          sender_role: senderRole,
+          sender_name: currentUserFullName || null,
+          project_id: projectId || null,
+        });
+        error = fb5.error;
+        if (error && /sender_name/i.test(error.message || '')) {
+          fb5 = await supabase.from('messages').insert({
+            content,
+            sender_role: senderRole,
+            project_id: projectId || null,
+          });
+          error = fb5.error;
+        }
+        if (error && /project_id/i.test(error.message || '')) {
+          fb5 = await supabase.from('messages').insert({
+            content,
+            sender_role: senderRole,
+            sender_name: currentUserFullName || null,
+          });
+          error = fb5.error;
+          if (error && /sender_name/i.test(error.message || '')) {
+            fb5 = await supabase.from('messages').insert({
+              content,
+              sender_role: senderRole,
+            });
+            error = fb5.error;
+          }
         }
       }
     }
@@ -2022,12 +2195,16 @@ function RadarChart({ axes: axesProp, datasets: datasetsProp } = {}) {
 }
 
 /** Loads chat rows for AI analysis (same table as ChatPanel; tolerant of missing columns). */
-async function fetchProjectChatMessagesForAI(projectId) {
+async function fetchProjectChatMessagesForAI(projectId, sprintNumber) {
   if (!projectId) return [];
+  const sn = normalizeMessagesSprintNumber(sprintNumber);
+  if (sn == null) return [];
+
   let q = supabase
     .from('messages')
     .select('id, content, sender_role, sender_name, sender_email, created_at, project_id')
     .eq('project_id', projectId)
+    .eq('sprint_number', sn)
     .order('created_at', { ascending: true })
     .limit(200);
   let { data, error } = await q;
@@ -2036,8 +2213,25 @@ async function fetchProjectChatMessagesForAI(projectId) {
       .from('messages')
       .select('id, content, sender_role, sender_email, created_at, project_id')
       .eq('project_id', projectId)
+      .eq('sprint_number', sn)
       .order('created_at', { ascending: true })
       .limit(200));
+  }
+  if (error && /sprint_number/i.test(error.message || '')) {
+    ({ data, error } = await supabase
+      .from('messages')
+      .select('id, content, sender_role, sender_name, sender_email, created_at, project_id')
+      .eq('project_id', projectId)
+      .order('created_at', { ascending: true })
+      .limit(200));
+    if (error && /sender_name/i.test(error.message || '')) {
+      ({ data, error } = await supabase
+        .from('messages')
+        .select('id, content, sender_role, sender_email, created_at, project_id')
+        .eq('project_id', projectId)
+        .order('created_at', { ascending: true })
+        .limit(200));
+    }
   }
   if (error && /project_id/i.test(error.message || '')) {
     ({ data, error } = await supabase
@@ -2724,7 +2918,7 @@ function ConflictPanel({
     setAiAnalysisLoading(true);
     setAiAnalysisResult(null);
     try {
-      const chatRows = await fetchProjectChatMessagesForAI(projectId);
+      const chatRows = await fetchProjectChatMessagesForAI(projectId, sprintNumber);
       const chatMessages = chatRows.map((m) => ({
         content: String(m.content ?? ''),
         senderName: String(m.sender_name || m.sender_email || 'User'),
@@ -4877,7 +5071,13 @@ export default function WorkspacePage() {
           }}
         />
 
-        <ChatPanel width={chatWidth} projectId={projectId} senderRole="engineer" />
+        <ChatPanel
+          width={chatWidth}
+          projectId={projectId}
+          senderRole="engineer"
+          viewingSprintNumber={workspaceEffectiveViewingSprint}
+          currentSprintNumber={workspaceCanonicalSprint}
+        />
 
         {/* Conflict 왼쪽 8px 리사이저 */}
         <div
