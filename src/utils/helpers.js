@@ -31,18 +31,29 @@ export function isEditableKeyboardTarget(target) {
   return false;
 }
 
-export function extractStoragePathFromPublicUrl(url) {
-  if (!url) return '';
+/**
+ * Supabase public object URL → `{ bucket, path }` for Storage API `.remove([path])`.
+ * Supports any bucket segment (e.g. design-bucket, designs).
+ */
+export function extractStorageObjectFromPublicUrl(url) {
+  if (!url || typeof url !== 'string') return { bucket: '', path: '' };
   try {
     const u = new URL(url);
-    const marker = '/object/public/design-bucket/';
-    const idx = u.pathname.indexOf(marker);
-    if (idx < 0) return '';
-    const encodedPath = u.pathname.slice(idx + marker.length);
-    return decodeURIComponent(encodedPath);
+    const m = u.pathname.match(/\/object\/public\/([^/]+)\/(.+)$/);
+    if (m) {
+      return {
+        bucket: m[1] || '',
+        path: decodeURIComponent(m[2] || ''),
+      };
+    }
   } catch {
-    return '';
+    /* noop */
   }
+  return { bucket: '', path: '' };
+}
+
+export function extractStoragePathFromPublicUrl(url) {
+  return extractStorageObjectFromPublicUrl(url).path;
 }
 
 export function mapDesignFileRow(row) {

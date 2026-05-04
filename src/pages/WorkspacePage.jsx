@@ -20,6 +20,7 @@ import { requestGeminiAnalysis } from '@/utils/geminiApi';
 import {
   getUserColor,
   isEditableKeyboardTarget,
+  extractStorageObjectFromPublicUrl,
   mapDesignFileRow,
   normalizeParticipantUserId,
   participantVoteDisplayName,
@@ -4792,18 +4793,42 @@ export default function WorkspacePage() {
     if (!designImage.url) return;
     setUploadState({ status: 'uploading', message: '' });
 
+    const fromUrl = extractStorageObjectFromPublicUrl(designImage.url);
+    const storagePath =
+      (typeof designImage.storagePath === 'string' && designImage.storagePath.trim()) ||
+      fromUrl.path ||
+      '';
+    const bucketName = fromUrl.bucket || 'design-bucket';
+    const designFileId = designImage.id ?? null;
+
+    // eslint-disable-next-line no-console
+    console.log('[DeleteDesign] inputs', {
+      designFileId,
+      url: designImage.url,
+      storagePathFromState: designImage.storagePath,
+      storagePathResolved: storagePath,
+      bucketFromUrl: fromUrl.bucket,
+      bucketUsed: bucketName,
+    });
+
     let storageError = null;
-    if (designImage.storagePath) {
-      const { error } = await supabase
-        .storage
-        .from('design-bucket')
-        .remove([designImage.storagePath]);
+    if (storagePath) {
+      const { error } = await supabase.storage.from(bucketName).remove([storagePath]);
       storageError = error;
+    } else {
+      // eslint-disable-next-line no-console
+      console.warn('[DeleteDesign] no storage path resolved; skipping Storage remove');
+    }
+    // eslint-disable-next-line no-console
+    console.log('[DeleteDesign] storage delete', { storagePath, bucketName, storageError });
+    if (storageError) {
+      // eslint-disable-next-line no-console
+      console.warn('[DeleteDesign] storage delete failed; continuing with DB delete', storageError);
     }
 
     let dbError = null;
-    if (designImage.id) {
-      const { error } = await supabase.from('design_files').delete().eq('id', designImage.id);
+    if (designFileId) {
+      const { error } = await supabase.from('design_files').delete().eq('id', designFileId);
       dbError = error;
     } else {
       let resp = await supabase.from('design_files').delete().eq('file_url', designImage.url);
@@ -4813,18 +4838,25 @@ export default function WorkspacePage() {
         dbError = resp.error;
       }
     }
+    // eslint-disable-next-line no-console
+    console.log('[DeleteDesign] db delete', { designFileId, dbError });
 
-    if (storageError || dbError) {
+    if (dbError) {
       setUploadState({
         status: 'error',
-        message: dbError?.message || storageError?.message || 'Delete failed.',
+        message: dbError?.message || 'Delete failed.',
       });
       return;
     }
 
     setDesignImage({ id: null, url: '', storagePath: '' });
-    setUploadState({ status: 'success', message: 'Image deleted.' });
-    setTimeout(() => setUploadState({ status: 'idle', message: '' }), 1500);
+    setUploadState({
+      status: 'success',
+      message: storageError
+        ? 'Removed from project. (Storage file may need manual cleanup.)'
+        : 'Image deleted.',
+    });
+    setTimeout(() => setUploadState({ status: 'idle', message: '' }), 1800);
   }
 
   return (
