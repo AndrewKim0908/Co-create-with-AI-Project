@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -29,8 +29,8 @@ button { font-family: inherit; cursor: pointer; }
   50% { opacity: 0.7; transform: scale(1.15); }
 }
 @keyframes option-glow {
-  0%, 100% { box-shadow: 0 0 0 2px rgba(30,138,90,0.4), 0 4px 16px rgba(30,138,90,0.12); }
-  50% { box-shadow: 0 0 0 3px rgba(30,138,90,0.7), 0 6px 24px rgba(30,138,90,0.22); }
+  0%, 100% { box-shadow: 0 0 0 2px rgba(6,182,212,0.4), 0 4px 16px rgba(6,182,212,0.12); }
+  50% { box-shadow: 0 0 0 3px rgba(6,182,212,0.7), 0 6px 24px rgba(6,182,212,0.22); }
 }
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(8px); }
@@ -64,9 +64,9 @@ const { useState, useEffect, useRef, useContext, createContext } = React;
 // ─── COLORS ─────────────────────────────────────────────────
 const C = {
   bg: '#FAFBFC', subtle: '#F4F6F8', muted: '#E2E8ED',
-  fg1: '#1E2A35', fg2: '#3A4A58', fg3: '#62788A', fg4: '#9BAAB7',
+  fg1: '#1E2A35', fg2: '#6b7280', fg3: '#62788A', fg4: '#9BAAB7',
   border: '#C5D0D9', borderSubtle: '#E2E8ED',
-  emerald: '#1E8A5A', emeraldHover: '#1A7A4F', emeraldLight: '#EDFAF3', emeraldBorder: '#8EDDB8',
+  emerald: '#06b6d4', emeraldHover: '#0891b2', emeraldLight: '#ecfeff', emeraldBorder: '#a5f3fc',
   coral: '#D05045', coralHover: '#C0423A', coralLight: '#FDF4F3', coralBorder: '#F2B8B4',
   navy: '#1E2A35', navyDark: '#131C24',
   amber: '#C88A1A', amberLight: '#FFFBF0',
@@ -749,13 +749,13 @@ const TimelineScreen = ({ onOpenSprint }) => {
                     background: isActive ? C.emerald : ev.outcome === 'approved' ? C.emeraldLight : C.coralLight,
                     border: `2px solid ${isActive ? C.emerald : ev.outcome === 'approved' ? C.emerald : C.coral}`,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    boxShadow: isActive ? '0 0 0 4px rgba(30,138,90,0.15)' : 'none',
+                    boxShadow: isActive ? '0 0 0 4px rgba(6,182,212,0.15)' : 'none',
                     animation: isActive ? 'pulse-dot 2s infinite' : 'none' }}>
                     <Icon name={o.icon} size={10} color={isActive ? '#fff' : o.color} />
                   </div>
                   <div onClick={() => isActive && onOpenSprint()}
                     style={{ background: C.white, border: `1px solid ${isActive ? C.emerald : C.borderSubtle}`, borderRadius: 6,
-                      boxShadow: isActive ? '0 0 0 3px rgba(30,138,90,0.1), 0 2px 8px rgba(30,42,53,0.08)' : '0 1px 3px rgba(30,42,53,0.06)',
+                      boxShadow: isActive ? '0 0 0 3px rgba(6,182,212,0.1), 0 2px 8px rgba(30,42,53,0.08)' : '0 1px 3px rgba(30,42,53,0.06)',
                       cursor: isActive ? 'pointer' : 'default' }}>
                     <div style={{ padding: '12px 16px', display: 'flex', alignItems: 'flex-start', gap: 12 }}>
                       <div style={{ flex: 1 }}>
@@ -817,19 +817,19 @@ const BlueprintViewer = ({ activePin, onPinClick }) => {
       </svg>
       <div style={{ position: 'relative' }}>
         <svg width="460" height="340" viewBox="0 0 460 340" style={{ filter: 'drop-shadow(0 8px 32px rgba(30,42,53,0.12))' }}>
-          <rect x="30" y="30" width="400" height="280" rx="4" fill="white" stroke="#3A4A58" strokeWidth="2"/>
+          <rect x="30" y="30" width="400" height="280" rx="4" fill="white" stroke="#6b7280" strokeWidth="2"/>
           <rect x="55" y="55" width="350" height="230" rx="2" fill="none" stroke="#62788A" strokeWidth="1" strokeDasharray="6,3"/>
-          <rect x="70" y="70" width="200" height="140" fill="#EDF7F2" stroke="#1E8A5A" strokeWidth="1.5"/>
-          <text x="170" y="145" textAnchor="middle" style={{ fontSize: 9, fill: '#1E8A5A', fontFamily: 'monospace', fontWeight: 600 }}>PCB-A · Rev.3</text>
+          <rect x="70" y="70" width="200" height="140" fill="#ecfeff" stroke="#06b6d4" strokeWidth="1.5"/>
+          <text x="170" y="145" textAnchor="middle" style={{ fontSize: 9, fill: '#06b6d4', fontFamily: 'monospace', fontWeight: 600 }}>PCB-A · Rev.3</text>
           <rect x="255" y="78" width="28" height="14" rx="2" fill="#FEF0CC" stroke="#C88A1A" strokeWidth="1"/>
           <text x="269" y="87" textAnchor="middle" style={{ fontSize: 7, fill: '#7A5500', fontFamily: 'monospace', fontWeight: 600 }}>J4</text>
           {[0,1,2,3,4,5].map(i => <rect key={i} x={300 + i * 14} y="70" width="8" height="140" fill="#EAF0F5" stroke="#9BAAB7" strokeWidth="0.8"/>)}
           <text x="385" y="145" textAnchor="middle" style={{ fontSize: 8, fill: '#62788A', fontFamily: 'monospace' }}>COOLING</text>
           {[[68,68],[270,68],[68,208],[270,208]].map(([cx,cy],i) => (
-            <circle key={i} cx={cx} cy={cy} r="5" fill="white" stroke={i===0 ? C.coral : '#3A4A58'} strokeWidth={i===0 ? 2 : 1.5}/>
+            <circle key={i} cx={cx} cy={cy} r="5" fill="white" stroke={i===0 ? C.coral : '#6b7280'} strokeWidth={i===0 ? 2 : 1.5}/>
           ))}
-          <rect x="130" y="170" width="60" height="36" rx="2" fill="#EDF7F2" stroke="#1E8A5A" strokeWidth="1"/>
-          <text x="160" y="192" textAnchor="middle" style={{ fontSize: 8, fill: '#1E8A5A', fontFamily: 'monospace' }}>THERMAL</text>
+          <rect x="130" y="170" width="60" height="36" rx="2" fill="#ecfeff" stroke="#06b6d4" strokeWidth="1"/>
+          <text x="160" y="192" textAnchor="middle" style={{ fontSize: 8, fill: '#06b6d4', fontFamily: 'monospace' }}>THERMAL</text>
           <line x1="70" y1="240" x2="270" y2="240" stroke="#9BAAB7" strokeWidth="0.8" strokeDasharray="4,2"/>
           <text x="170" y="254" textAnchor="middle" style={{ fontSize: 8, fill: '#9BAAB7', fontFamily: 'monospace' }}>200mm</text>
           <line x1="290" y1="70" x2="290" y2="210" stroke="#9BAAB7" strokeWidth="0.8" strokeDasharray="4,2"/>
@@ -918,7 +918,7 @@ const ChatPanel = () => {
           );
           if (msg.type === 'ai') return (
             <div key={i} style={{ display: 'flex', gap: 6 }}>
-              <div style={{ width: 22, height: 22, borderRadius: 3, background: 'linear-gradient(135deg,#1E8A5A,#25A46C)', color: '#fff', fontSize: 9, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>AI</div>
+              <div style={{ width: 22, height: 22, borderRadius: 3, background: 'linear-gradient(135deg,#06b6d4,#22d3ee)', color: '#fff', fontSize: 9, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>AI</div>
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 10, fontWeight: 600, color: C.emerald, marginBottom: 2 }}>Co-Create AI</div>
                 <div style={{ fontSize: 11, color: msg.isOptionC ? C.fg1 : C.fg2, lineHeight: 1.5,
@@ -963,7 +963,7 @@ const RadarChart = () => {
       {axes.map((ax,i) => { const end = axisEnd(i); return <g key={ax}><line x1={cx} y1={cy} x2={end.x} y2={end.y} stroke="#C5D0D9" strokeWidth="0.8"/><text x={end.x+(end.x-cx)*0.12} y={end.y+(end.y-cy)*0.12+3} textAnchor="middle" style={{ fontSize: 8, fill: '#62788A', fontFamily: 'Inter,sans-serif' }}>{ax}</text></g>; })}
       <polygon points={pts(engineer)} fill="rgba(62,106,165,0.10)" stroke="#3A6EA5" strokeWidth="1.5" strokeDasharray="3,2"/>
       <polygon points={pts(designer)}  fill="rgba(208,80,69,0.08)"  stroke="#D05045" strokeWidth="1.5" strokeDasharray="3,2"/>
-      <polygon points={pts(optionC)}   fill="rgba(30,138,90,0.12)"  stroke="#1E8A5A" strokeWidth="2"/>
+      <polygon points={pts(optionC)}   fill="rgba(6,182,212,0.12)"  stroke="#06b6d4" strokeWidth="2"/>
       {[{color:'#3A6EA5',label:'Engineer'},{color:C.coral,label:'Designer'},{color:C.emerald,label:'Option C'}].map((l,i)=>(
         <g key={l.label} transform={`translate(4,${155+i*9})`}><rect width="10" height="2" y="3" fill={l.color} rx="1"/><text x="14" y="8" style={{ fontSize: 8, fill: '#62788A', fontFamily: 'Inter,sans-serif' }}>{l.label}</text></g>
       ))}
@@ -1035,7 +1035,7 @@ const ConflictPanel = ({ onApprove, onReject }) => {
           style={{ width: '100%', padding: '10px', borderRadius: 5, fontSize: 13, fontWeight: 600, color: '#fff',
             background: appHov ? C.emeraldHover : C.emerald, border: 'none', cursor: 'pointer',
             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
-            boxShadow: appHov ? '0 4px 12px rgba(30,138,90,0.35)' : '0 2px 6px rgba(30,138,90,0.25)',
+            boxShadow: appHov ? '0 4px 12px rgba(6,182,212,0.35)' : '0 2px 6px rgba(6,182,212,0.25)',
             transition: 'all 160ms', transform: appHov ? 'translateY(-1px)' : 'none' }}>
           <Icon name="check" size={15} color="#fff" /> {t(lang,'approveBtn')}
         </button>
@@ -1187,3 +1187,4 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
 </script>
 </body>
 </html>
+

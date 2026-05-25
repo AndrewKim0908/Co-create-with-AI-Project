@@ -68,8 +68,8 @@ export default function LandingPage() {
       borderBottom:
         scrollY > 40
           ? theme === 'dark'
-            ? '1px solid rgba(16,185,129,0.12)'
-            : '1px solid rgba(16,185,129,0.2)'
+            ? '1px solid rgba(6,182,212,0.12)'
+            : '1px solid rgba(6,182,212,0.2)'
           : 'none',
       transition: 'all 0.3s ease',
     }),
@@ -86,9 +86,9 @@ export default function LandingPage() {
         .landing-root * { box-sizing: border-box; margin: 0; padding: 0; }
 
         .landing-root[data-theme="dark"] {
-          --em: #10b981;
-          --em-d: #059669;
-          --em-l: rgba(16,185,129,0.12);
+          --em: #06b6d4;
+          --em-d: #0891b2;
+          --em-l: rgba(6,182,212,0.12);
           --bg: #0a1628;
           --bg2: #0f1e30;
           --bg3: #14243a;
@@ -101,9 +101,9 @@ export default function LandingPage() {
         }
 
         .landing-root[data-theme="light"] {
-          --em: #059669;
-          --em-d: #047857;
-          --em-l: rgba(5,150,105,0.14);
+          --em: #0891b2;
+          --em-d: #0e7490;
+          --em-l: rgba(6,182,212,0.14);
           --bg: #f8fafc;
           --bg2: #f1f5f9;
           --bg3: #e2e8f0;
@@ -138,34 +138,34 @@ export default function LandingPage() {
           position: absolute;
           width: 900px; height: 600px;
           border-radius: 50%;
-          background: radial-gradient(ellipse, rgba(16,185,129,0.15) 0%, transparent 70%);
+          background: radial-gradient(ellipse, rgba(6,182,212,0.15) 0%, transparent 70%);
           top: -100px; left: 50%; transform: translateX(-50%);
           pointer-events: none;
         }
         .landing-root[data-theme="light"] .hero-glow {
-          background: radial-gradient(ellipse, rgba(5,150,105,0.12) 0%, transparent 70%);
+          background: radial-gradient(ellipse, rgba(6,182,212,0.12) 0%, transparent 70%);
         }
 
         .landing-root .grid-bg {
           position: absolute; inset: 0;
           background-image:
-            linear-gradient(rgba(16,185,129,0.04) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(16,185,129,0.04) 1px, transparent 1px);
+            linear-gradient(rgba(6,182,212,0.04) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(6,182,212,0.04) 1px, transparent 1px);
           background-size: 60px 60px;
           mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, black 0%, transparent 70%);
           pointer-events: none;
         }
         .landing-root[data-theme="light"] .grid-bg {
           background-image:
-            linear-gradient(rgba(5,150,105,0.08) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(5,150,105,0.08) 1px, transparent 1px);
+            linear-gradient(rgba(6,182,212,0.08) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(6,182,212,0.08) 1px, transparent 1px);
         }
 
         .landing-root .badge {
           display: inline-flex; align-items: center; gap: 8px;
           padding: 6px 14px; border-radius: 999px;
-          border: 1px solid rgba(16,185,129,0.35);
-          background: rgba(16,185,129,0.08);
+          border: 1px solid rgba(6,182,212,0.35);
+          background: rgba(6,182,212,0.08);
           font-size: 13px; color: var(--em);
           font-family: 'DM Sans', sans-serif;
         }
@@ -189,7 +189,7 @@ export default function LandingPage() {
           border: none; cursor: pointer; text-decoration: none;
           transition: all 0.2s;
         }
-        .landing-root .btn-primary:hover { background: var(--em-d); transform: translateY(-2px); box-shadow: 0 8px 24px rgba(16,185,129,0.3); }
+        .landing-root .btn-primary:hover { background: var(--em-d); transform: translateY(-2px); box-shadow: 0 8px 24px rgba(6,182,212,0.3); }
 
         .landing-root .btn-ghost {
           display: inline-flex; align-items: center; gap: 8px;
@@ -218,10 +218,10 @@ export default function LandingPage() {
           width: 100%; max-width: 960px; margin: 0 auto;
           border-radius: 18px; overflow: hidden;
           border: 1px solid var(--border);
-          box-shadow: 0 48px 96px rgba(0,0,0,0.35), 0 0 0 1px rgba(16,185,129,0.05);
+          box-shadow: 0 48px 96px rgba(0,0,0,0.35), 0 0 0 1px rgba(6,182,212,0.05);
         }
         .landing-root[data-theme="light"] .mockup-wrap {
-          box-shadow: 0 24px 48px rgba(15,23,42,0.12), 0 0 0 1px rgba(16,185,129,0.08);
+          box-shadow: 0 24px 48px rgba(15,23,42,0.12), 0 0 0 1px rgba(6,182,212,0.08);
         }
 
         .landing-root .mockup-bar {
@@ -367,7 +367,7 @@ export default function LandingPage() {
         }
         .landing-root .ws-timeline-dot.active {
           background: var(--em);
-          box-shadow: 0 0 0 2px rgba(16,185,129,0.35);
+          box-shadow: 0 0 0 2px rgba(6,182,212,0.35);
         }
 
         .landing-root .ws-canvas-wrap {
@@ -381,8 +381,8 @@ export default function LandingPage() {
         .landing-root .ws-canvas {
           flex: 1;
           border-radius: 8px;
-          border: 1px dashed rgba(16,185,129,0.35);
-          background: rgba(16,185,129,0.06);
+          border: 1px dashed rgba(6,182,212,0.35);
+          background: rgba(6,182,212,0.06);
           position: relative;
           min-height: 120px;
           display: flex;
@@ -391,7 +391,7 @@ export default function LandingPage() {
         }
         .landing-root[data-theme="light"] .ws-canvas {
           background: rgba(241,245,249,0.9);
-          border-color: rgba(5,150,105,0.35);
+          border-color: rgba(6,182,212,0.35);
         }
 
         .landing-root .ws-canvas-hint {
@@ -497,12 +497,12 @@ export default function LandingPage() {
           background: linear-gradient(90deg, transparent, var(--em), transparent);
           opacity: 0; transition: opacity 0.3s;
         }
-        .landing-root .feat-card:hover { border-color: rgba(16,185,129,0.25); transform: translateY(-5px); }
+        .landing-root .feat-card:hover { border-color: rgba(6,182,212,0.25); transform: translateY(-5px); }
         .landing-root .feat-card:hover::after { opacity: 1; }
 
         .landing-root .feat-icon {
           width: 44px; height: 44px; border-radius: 11px;
-          background: var(--em-l); border: 1px solid rgba(16,185,129,0.2);
+          background: var(--em-l); border: 1px solid rgba(6,182,212,0.2);
           display: flex; align-items: center; justify-content: center;
           margin-bottom: 18px;
         }
@@ -530,10 +530,10 @@ export default function LandingPage() {
         .landing-root .how-step:last-child { border-right: none; }
         .landing-root .how-num {
           font-family: 'Fraunces', serif;
-          font-size: 56px; font-weight: 300; color: rgba(16,185,129,0.2);
+          font-size: 56px; font-weight: 300; color: rgba(6,182,212,0.2);
           line-height: 1; margin-bottom: 16px;
         }
-        .landing-root[data-theme="light"] .how-num { color: rgba(5,150,105,0.25); }
+        .landing-root[data-theme="light"] .how-num { color: rgba(6,182,212,0.25); }
         .landing-root .how-title { font-size: 16px; font-weight: 500; margin-bottom: 10px; font-family: 'DM Sans', sans-serif; color: var(--txt); }
         .landing-root .how-desc { font-size: 14px; color: var(--muted); line-height: 1.7; font-family: 'DM Sans', sans-serif; }
 
@@ -977,7 +977,7 @@ export default function LandingPage() {
           style={{
             position: 'absolute',
             inset: 0,
-            background: 'radial-gradient(ellipse 60% 80% at 50% 50%, rgba(16,185,129,0.08) 0%, transparent 70%)',
+            background: 'radial-gradient(ellipse 60% 80% at 50% 50%, rgba(6,182,212,0.08) 0%, transparent 70%)',
             pointerEvents: 'none',
           }}
         />

@@ -81,7 +81,7 @@ function PrioritySliderRow({
             right: 0,
             height: 6,
             borderRadius: 3,
-            background: 'linear-gradient(to right, #3A6EA5 0%, #1E8A5A 100%)',
+            background: 'linear-gradient(to right, #3A6EA5 0%, #06b6d4 100%)',
             pointerEvents: 'none',
           }}
         />
@@ -99,7 +99,7 @@ function PrioritySliderRow({
             height: 22,
             margin: 0,
             background: 'transparent',
-            accentColor: value <= 50 ? '#3A6EA5' : '#1E8A5A',
+            accentColor: value <= 50 ? '#3A6EA5' : '#06b6d4',
           }}
         />
       </div>

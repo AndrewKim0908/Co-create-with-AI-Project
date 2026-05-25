@@ -7,15 +7,15 @@ import { useLang } from '@/i18n/LangContext';
 
 // ─── Tokens — keep all sidebar shades in one place ────────────
 const SIDEBAR = {
-  bg: '#1B2530',
-  divider: 'rgba(255,255,255,0.05)',
-  itemActiveBg: 'rgba(255,255,255,0.07)',
-  itemHoverBg: 'rgba(255,255,255,0.035)',
-  fgActive: '#FFFFFF',
-  fgIdle: 'rgba(255,255,255,0.55)',
-  fgHover: 'rgba(255,255,255,0.82)',
-  brandSub: 'rgba(255,255,255,0.4)',
-  profileSub: 'rgba(255,255,255,0.5)',
+  bg: '#f5f6f8',
+  divider: 'rgba(0,0,0,0.08)',
+  itemActiveBg: 'rgba(6,182,212,0.12)',
+  itemHoverBg: 'rgba(0,0,0,0.05)',
+  fgActive: '#06b6d4',
+  fgIdle: 'rgba(30,42,53,0.55)',
+  fgHover: '#1E2A35',
+  brandSub: 'rgba(30,42,53,0.45)',
+  profileSub: 'rgba(30,42,53,0.5)',
 };
 
 // Match `/project/:id/...` and pull the id back out without needing
@@ -66,19 +66,21 @@ function SideNavItem({ item, active, onClick, collapsed }) {
       }}
     >
       <Icon name={item.icon} size={18} color={fg} />
-      {!collapsed ? (
-        <span
-          style={{
-            flex: 1,
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            transition: 'opacity 300ms ease',
-          }}
-        >
-          {item.label}
-        </span>
-      ) : null}
+      <span
+        style={{
+          flex: collapsed ? 0 : 1,
+          width: collapsed ? 0 : 'auto',
+          minWidth: 0,
+          overflow: 'hidden',
+          whiteSpace: 'nowrap',
+          textOverflow: 'ellipsis',
+          opacity: collapsed ? 0 : 1,
+          transition: collapsed ? 'opacity 100ms ease' : 'opacity 200ms ease 150ms',
+          pointerEvents: 'none',
+        }}
+      >
+        {item.label}
+      </span>
     </button>
   );
 }
@@ -114,7 +116,16 @@ function BackToHubButton({ onClick, label, collapsed }) {
       }}
     >
       <Icon name="home" size={16} color={fg} />
-      {!collapsed ? <span>{label}</span> : null}
+      <span style={{
+        flex: collapsed ? 0 : 1,
+        width: collapsed ? 0 : 'auto',
+        minWidth: 0,
+        overflow: 'hidden',
+        whiteSpace: 'nowrap',
+        opacity: collapsed ? 0 : 1,
+        transition: collapsed ? 'opacity 100ms ease' : 'opacity 200ms ease 150ms',
+        pointerEvents: 'none',
+      }}>{label}</span>
     </button>
   );
 }
@@ -152,39 +163,48 @@ function ProjectContextStrip({ project, onBack, backLabel, collapsed }) {
         }}
       >
         <Icon name="chevron-left" size={13} color={hov ? SIDEBAR.fgHover : SIDEBAR.fgIdle} />
-        {!collapsed ? backLabel : null}
+        <span style={{
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          opacity: collapsed ? 0 : 1,
+          transition: collapsed ? 'opacity 100ms ease' : 'opacity 200ms ease 150ms',
+          pointerEvents: 'none',
+        }}>{backLabel}</span>
       </button>
 
-      {!collapsed ? (
-        <>
-          <div
-            style={{
-              marginTop: 8,
-              fontSize: 13.5,
-              fontWeight: 700,
-              color: '#fff',
-              letterSpacing: '-0.01em',
-              lineHeight: 1.25,
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-            }}
-            title={project.name}
-          >
-            {project.name}
-          </div>
-          <div
-            style={{
-              fontSize: 10.5,
-              color: SIDEBAR.brandSub,
-              marginTop: 2,
-              letterSpacing: '0.04em',
-            }}
-          >
-            {project.team} · Sprint #{project.sprint}
-          </div>
-        </>
-      ) : null}
+      <div style={{
+        opacity: collapsed ? 0 : 1,
+        transition: collapsed ? 'opacity 100ms ease' : 'opacity 200ms ease 150ms',
+        pointerEvents: collapsed ? 'none' : 'auto',
+      }}>
+        <div
+          style={{
+            marginTop: 8,
+            fontSize: 13.5,
+            fontWeight: 700,
+            color: '#1E2A35',
+            letterSpacing: '-0.01em',
+            lineHeight: 1.25,
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+          }}
+          title={project.name}
+        >
+          {project.name}
+        </div>
+        <div
+          style={{
+            fontSize: 10.5,
+            color: SIDEBAR.brandSub,
+            marginTop: 2,
+            letterSpacing: '0.04em',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {project.team} · Sprint #{project.sprint}
+        </div>
+      </div>
     </div>
   );
 }
@@ -198,7 +218,7 @@ export default function Sidebar({ user, onLogout }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [profileHov, setProfileHov] = useState(false);
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
 
   const projectId = parseProjectId(location.pathname);
   const project = getProjectById(projectId);
@@ -244,6 +264,8 @@ export default function Sidebar({ user, onLogout }) {
 
   return (
     <aside
+      onMouseEnter={() => setCollapsed(false)}
+      onMouseLeave={() => setCollapsed(true)}
       style={{
         width: collapsed ? SIDEBAR_W_COLLAPSED : SIDEBAR_W_EXPANDED,
         flexShrink: 0,
@@ -251,42 +273,16 @@ export default function Sidebar({ user, onLogout }) {
         display: 'flex',
         flexDirection: 'column',
         height: '100%',
-        borderRight: '1px solid rgba(255,255,255,0.04)',
+        borderRight: '1px solid rgba(0,0,0,0.08)',
         transition: 'width 300ms ease',
         position: 'relative',
         overflow: 'hidden',
       }}
     >
-      <button
-        type="button"
-        onClick={() => setCollapsed((c) => !c)}
-        aria-expanded={!collapsed}
-        title={collapsed ? t('navHub') : undefined}
-        style={{
-          position: 'absolute',
-          top: 14,
-          right: collapsed ? 10 : 12,
-          zIndex: 3,
-          width: 28,
-          height: 28,
-          borderRadius: 6,
-          border: '1px solid rgba(255,255,255,0.12)',
-          background: 'rgba(255,255,255,0.06)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          cursor: 'pointer',
-          color: SIDEBAR.fgIdle,
-          transition: 'background 140ms ease, right 300ms ease',
-        }}
-      >
-        <Icon name={collapsed ? 'chevron-right' : 'chevron-left'} size={16} color="rgba(255,255,255,0.75)" />
-      </button>
-
       {/* Brand header */}
       <div
         style={{
-          padding: collapsed ? '48px 8px 16px' : '22px 40px 20px 18px',
+          padding: collapsed ? '20px 8px 16px' : '22px 40px 20px 18px',
           display: 'flex',
           alignItems: 'center',
           justifyContent: collapsed ? 'center' : 'flex-start',
@@ -299,47 +295,54 @@ export default function Sidebar({ user, onLogout }) {
             width: 38,
             height: 38,
             borderRadius: 8,
-            background: '#FFFFFF',
+            background: 'transparent',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             flexShrink: 0,
-            boxShadow: '0 1px 3px rgba(0,0,0,0.25)',
           }}
         >
           <img
-            src="/assets/logo.png"
+            src="/assets/logo-v2.png"
             alt="Co-Create AI"
-            style={{ width: 32, height: 32, borderRadius: 4, objectFit: 'contain' }}
+            style={{ width: 32, height: 32, objectFit: 'contain' }}
           />
         </div>
-        {!collapsed ? (
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <div
-              style={{
-                fontSize: 15,
-                fontWeight: 700,
-                color: '#fff',
-                letterSpacing: '-0.015em',
-                lineHeight: 1.15,
-              }}
-            >
-              {t('platformName')}
-            </div>
-            <div
-              style={{
-                fontSize: 9.5,
-                fontWeight: 600,
-                letterSpacing: '0.13em',
-                textTransform: 'uppercase',
-                color: SIDEBAR.brandSub,
-                marginTop: 4,
-              }}
-            >
-              {t('platformSub')}
-            </div>
+        <div style={{
+          flex: collapsed ? 0 : 1,
+          width: collapsed ? 0 : 'auto',
+          overflow: 'hidden',
+          minWidth: 0,
+          opacity: collapsed ? 0 : 1,
+          transition: collapsed ? 'opacity 100ms ease' : 'opacity 200ms ease 150ms',
+          pointerEvents: collapsed ? 'none' : 'auto',
+        }}>
+          <div
+            style={{
+              fontSize: 15,
+              fontWeight: 700,
+              color: '#1E2A35',
+              letterSpacing: '-0.015em',
+              lineHeight: 1.15,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {t('platformName')}
           </div>
-        ) : null}
+          <div
+            style={{
+              fontSize: 9.5,
+              fontWeight: 600,
+              letterSpacing: '0.13em',
+              textTransform: 'uppercase',
+              color: SIDEBAR.brandSub,
+              marginTop: 4,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {t('platformSub')}
+          </div>
+        </div>
       </div>
 
       <div style={{ height: 1, background: SIDEBAR.divider, margin: collapsed ? '0 8px' : '0 18px', transition: 'margin 300ms ease' }} />
@@ -431,9 +434,9 @@ export default function Sidebar({ user, onLogout }) {
             gap: collapsed ? 0 : 8,
             padding: collapsed ? '8px 0' : '8px 10px',
             borderRadius: 8,
-            border: '1px solid rgba(255,255,255,0.12)',
-            background: 'rgba(255,255,255,0.02)',
-            color: 'rgba(255,255,255,0.84)',
+            border: '1px solid rgba(0,0,0,0.1)',
+            background: 'rgba(0,0,0,0.03)',
+            color: '#1E2A35',
             fontSize: 12,
             fontWeight: 600,
             cursor: 'pointer',
@@ -441,8 +444,15 @@ export default function Sidebar({ user, onLogout }) {
             transition: 'padding 300ms ease',
           }}
         >
-          <Icon name="log-out" size={14} color="rgba(255,255,255,0.84)" />
-          {!collapsed ? t('logout') : null}
+          <Icon name="log-out" size={14} color="#1E2A35" />
+          <span style={{
+            width: collapsed ? 0 : 'auto',
+            overflow: 'hidden',
+            whiteSpace: 'nowrap',
+            opacity: collapsed ? 0 : 1,
+            transition: collapsed ? 'opacity 100ms ease' : 'opacity 200ms ease 150ms',
+            pointerEvents: 'none',
+          }}>{t('logout')}</span>
         </button>
 
         <button
@@ -459,9 +469,9 @@ export default function Sidebar({ user, onLogout }) {
             padding: collapsed ? '10px 0' : '10px 12px',
             borderRadius: 10,
             background: profileHov
-              ? 'rgba(255,255,255,0.06)'
-              : 'rgba(255,255,255,0.035)',
-            border: '1px solid rgba(255,255,255,0.06)',
+              ? 'rgba(0,0,0,0.05)'
+              : 'rgba(0,0,0,0.03)',
+            border: '1px solid rgba(0,0,0,0.08)',
             cursor: 'pointer',
             fontFamily: 'inherit',
             textAlign: 'left',
@@ -488,44 +498,52 @@ export default function Sidebar({ user, onLogout }) {
             {user?.initials || '··'}
           </div>
 
-          {!collapsed ? (
-            <>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div
-                  style={{
-                    fontSize: 13.5,
-                    fontWeight: 600,
-                    color: '#fff',
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    lineHeight: 1.25,
-                    letterSpacing: '-0.005em',
-                  }}
-                >
-                  {user?.name || 'Guest'}
-                </div>
-                <div
-                  style={{
-                    fontSize: 11.5,
-                    color: SIDEBAR.profileSub,
-                    marginTop: 2,
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                  }}
-                >
-                  {roleLabel}
-                </div>
+          <div style={{
+            flex: collapsed ? 0 : 1,
+            width: collapsed ? 0 : 'auto',
+            overflow: 'hidden',
+            minWidth: 0,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            opacity: collapsed ? 0 : 1,
+            transition: collapsed ? 'opacity 100ms ease' : 'opacity 200ms ease 150ms',
+            pointerEvents: 'none',
+          }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div
+                style={{
+                  fontSize: 13.5,
+                  fontWeight: 600,
+                  color: '#1E2A35',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  lineHeight: 1.25,
+                  letterSpacing: '-0.005em',
+                }}
+              >
+                {user?.name || 'Guest'}
               </div>
-
-              <Icon
-                name="chevron-up-down"
-                size={15}
-                color="rgba(255,255,255,0.5)"
-              />
-            </>
-          ) : null}
+              <div
+                style={{
+                  fontSize: 11.5,
+                  color: SIDEBAR.profileSub,
+                  marginTop: 2,
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}
+              >
+                {roleLabel}
+              </div>
+            </div>
+            <Icon
+              name="chevron-up-down"
+              size={15}
+              color="rgba(30,42,53,0.35)"
+            />
+          </div>
         </button>
       </div>
     </aside>

@@ -95,7 +95,7 @@ export default function Signup() {
       >
         <header className="text-center">
           <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-lg bg-white shadow-sm">
-            <img src="/assets/logo.png" alt="Co-Create AI" className="h-10 w-10 rounded-md object-contain" />
+            <img src="/assets/logo-v2.png" alt="Co-Create AI" className="h-10 w-10 rounded-md object-contain" />
           </div>
           <h1 className="text-2xl font-bold tracking-tight text-fg-1">
             {isKo ? '계정 만들기' : 'Create your account'}

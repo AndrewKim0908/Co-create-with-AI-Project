@@ -190,7 +190,7 @@ export function normalizeAnalysisResult(raw) {
   const projectValues = axes.map((_, i) => clampPct(projectValuesRaw[i] ?? projectValuesRaw[0] ?? 70));
 
   const positionValuesIn = Array.isArray(vm.positionValues) ? vm.positionValues : [];
-  const fallbackColors = ['#10b981', '#3b82f6', '#a855f7', '#f97316'];
+  const fallbackColors = ['#06b6d4', '#3b82f6', '#a855f7', '#f97316'];
   const positionValues = positionValuesIn.map((row, idx) => {
     const r = row && typeof row === 'object' ? row : {};
     const valsIn = Array.isArray(r.values) ? r.values : [];

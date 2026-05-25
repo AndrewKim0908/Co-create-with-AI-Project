@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run *)",
+      "Bash(Remove-Item -Recurse -Force node_modules/.vite -ErrorAction SilentlyContinue)",
+      "PowerShell(node -e \"const {Jimp}=require\\('jimp'\\); const j=new Jimp\\({width:1,height:1}\\); console.log\\(Object.getOwnPropertyNames\\(Object.getPrototypeOf\\(j\\)\\).filter\\(k=>k.includes\\('write'\\)||k.includes\\('save'\\)\\)\\)\")",
+      "Bash(grep -E \"\\\\.\\(jsx|tsx|js|ts\\)$\")",
+      "Bash(grep -E \"\\\\.\\(jsx|tsx|json\\)$\")"
+    ]
+  }
+}

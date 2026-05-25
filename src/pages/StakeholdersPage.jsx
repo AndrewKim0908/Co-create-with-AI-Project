@@ -16,7 +16,7 @@ const STAKEHOLDERS = [
     id: 'LS', name: 'Lee Sungmin',  role: 'Hardware Engineer',
     status: 'active',  weight: 1.2,
     expertise: ['Thermal', 'Analysis'],
-    accent: '#1E8A5A',
+    accent: '#06b6d4',
   },
   {
     id: 'SC', name: 'Sarah Chen',   role: 'Product Designer',

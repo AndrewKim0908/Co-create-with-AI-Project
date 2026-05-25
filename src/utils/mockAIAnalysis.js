@@ -45,7 +45,7 @@ export const mockAIAnalysisResult = {
     positionValues: [
       {
         userName: 'Andrew Kim',
-        color: '#10b981', // emerald
+        color: '#06b6d4', // cyan
         values: [50, 85, 90, 70, 75, 80],
       },
       {

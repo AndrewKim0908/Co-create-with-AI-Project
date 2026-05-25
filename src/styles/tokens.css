@@ -17,7 +17,7 @@
   --slate-950:  #131C24;
   --slate-900:  #1E2A35;
   --slate-800:  #2A3848;
-  --slate-700:  #3A4A58;
+  --slate-700:  #6b7280;
   --slate-600:  #4E6070;
   --slate-500:  #62788A;
   --slate-400:  #7A8E9E;
@@ -28,14 +28,14 @@
   --slate-25:   #FAFBFC;
 
   /* ─── EMERALD ──────────────────────────────────────────── */
-  --emerald-700: #155E3D;
-  --emerald-600: #1A7A4F;
-  --emerald-500: #1E8A5A;
-  --emerald-400: #25A46C;
-  --emerald-300: #4DC48D;
-  --emerald-200: #8EDDB8;
-  --emerald-100: #C8F0DC;
-  --emerald-50:  #EDFAF3;
+  --emerald-700: #0e7490;
+  --emerald-600: #0891b2;
+  --emerald-500: #06b6d4;
+  --emerald-400: #22d3ee;
+  --emerald-300: #67e8f9;
+  --emerald-200: #a5f3fc;
+  --emerald-100: #cffafe;
+  --emerald-50:  #ecfeff;
 
   /* ─── CORAL ────────────────────────────────────────────── */
   --coral-700:  #A33428;

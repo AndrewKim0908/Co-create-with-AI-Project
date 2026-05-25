@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import Header from '@/components/Header';
 import Icon from '@/components/Icon';
 import LanguageDropdown from '@/components/LanguageDropdown';
 import ProjectOverviewModal from '@/components/ProjectOverviewModal';
+import ConsensusModal from '@/components/ConsensusModal';
 import { C } from '@/constants/colors';
 import { getProjectById, DEFAULT_PROJECT } from '@/constants/projects';
 import {
@@ -418,6 +419,7 @@ function BlueprintViewer({
   onDeleteImage,
   uploadState,
   currentSprint,
+  projectMetaLoading = false,
   viewingSprint,
   onSprintSelect,
   onRequestDeleteSprint,
@@ -1148,6 +1150,7 @@ function BlueprintViewer({
         <SprintTimelinePanel
           timelineAnchorSeed={timelineAnchorSeed}
           currentSprint={currentSprint}
+          projectMetaLoading={projectMetaLoading}
           viewingSprint={viewingSprint}
           onSprintSelect={onSprintSelect}
           onRequestDeleteSprint={onRequestDeleteSprint}
@@ -1252,7 +1255,7 @@ function BlueprintViewer({
             justifyContent: 'center',
             cursor: 'pointer',
             boxShadow: handTool
-              ? '0 1px 6px rgba(30,138,90,0.2)'
+              ? '0 1px 6px rgba(6,182,212,0.2)'
               : '0 1px 3px rgba(30,42,53,0.08)',
           }}
         >
@@ -2036,7 +2039,7 @@ function RadarChart({ axes: axesProp, datasets: datasetsProp } = {}) {
     {
       label: 'Option C',
       values: normalizeSeries([75, 82, 88, 85, 78, 87]),
-      color: '#1E8A5A',
+      color: '#06b6d4',
       lineStyle: 'solid',
     },
   ];
@@ -2178,12 +2181,15 @@ function ConflictPanel({
   width,
   projectId,
   sprintNumber,
+  currentSprintNumber = null,
   ownerUserId = null,
   consensusNote = '',
   onSaveConsensusNote,
   onApprove,
   onReject,
   onReachConsensus,
+  onSaveConsensusRecord,
+  onAdvanceViewingSprint,
   geminiProject = null,
   designImageUrls = [],
   isOwner = false,
@@ -2195,6 +2201,8 @@ function ConflictPanel({
   const [aiAnalysisResult, setAiAnalysisResult] = useState(null);
   const [activeConflictExpanded, setActiveConflictExpanded] = useState(false);
   const [expandedPositions, setExpandedPositions] = useState({});
+  const [conflictDraft, setConflictDraft] = useState('');
+  const [resolutionDraft, setResolutionDraft] = useState('');
   const [noteDraft, setNoteDraft] = useState('');
   const [memoLocked, setMemoLocked] = useState(false);
   const [savingMemo, setSavingMemo] = useState(false);
@@ -2203,6 +2211,12 @@ function ConflictPanel({
   const [participants, setParticipants] = useState([]);
   const [voteMap, setVoteMap] = useState({});
   const [authUid, setAuthUid] = useState(null);
+  const [consensusRecord, setConsensusRecord] = useState(null);
+  const [isEditingConsensus, setIsEditingConsensus] = useState(false);
+  const [editedConflict, setEditedConflict] = useState('');
+  const [editedResolution, setEditedResolution] = useState('');
+  const [editedNote, setEditedNote] = useState('');
+  const [savingConsensus, setSavingConsensus] = useState(false);
   const participantsRef = useRef([]);
   const unanimousNavLockRef = useRef(false);
   /** Broadcast + postgres listener share this subscription (postges may not reach peer clients under some RLS/Realtime setups). */
@@ -2480,7 +2494,7 @@ function ConflictPanel({
         });
       }
       try {
-        await onApproveRef.current?.();
+        await onApproveRef.current?.(aiAnalysisResult);
       } catch (e) {
         // eslint-disable-next-line no-console
         console.warn('[ConflictPanel][SYNC] onApprove threw', e);
@@ -2520,6 +2534,21 @@ function ConflictPanel({
   }, [consensusNote]);
 
   useEffect(() => {
+    setConflictDraft('');
+    setResolutionDraft('');
+    setNoteDraft('');
+    setMemoLocked(false);
+    setSavingMemo(false);
+    setActiveConflictExpanded(false);
+    setExpandedPositions({});
+    setAiAnalysisLoading(false);
+    setIsEditingConsensus(false);
+    setEditedConflict('');
+    setEditedResolution('');
+    setEditedNote('');
+  }, [sprintNumber]);
+
+  useEffect(() => {
     loadVotes();
   }, [loadVotes, participants]);
 
@@ -2532,24 +2561,43 @@ function ConflictPanel({
     async function loadStoredAnalysis() {
       const sn = resolveSprintVotesSprintNumber(sprintNumber);
       if (!projectId || sn == null) {
-        if (!cancelled) setAiAnalysisResult(null);
+        if (!cancelled) {
+          setAiAnalysisResult(null);
+          setConsensusRecord(null);
+        }
         return;
       }
-      const { data, error } = await supabase
+
+      const aiRes = await supabase
         .from('sprint_ai_analysis')
         .select('analysis_result')
         .eq('project_id', projectId)
         .eq('sprint_number', sn)
         .maybeSingle();
       if (cancelled) return;
-      if (error && import.meta.env.DEV) {
+      if (aiRes.error) {
         // eslint-disable-next-line no-console
-        console.warn('[ConflictPanel] sprint_ai_analysis load', error.message);
+        console.warn('[ConflictPanel] analysis_result load failed:', aiRes.error.message);
       }
-      if (data?.analysis_result) {
-        setAiAnalysisResult(data.analysis_result);
+      if (!cancelled) {
+        setAiAnalysisResult(aiRes.data?.analysis_result ?? null);
+      }
+
+      const crRes = await supabase
+        .from('sprint_ai_analysis')
+        .select('consensus_record')
+        .eq('project_id', projectId)
+        .eq('sprint_number', sn)
+        .maybeSingle();
+      if (cancelled) return;
+      if (crRes.error) {
+        // eslint-disable-next-line no-console
+        console.warn('[ConflictPanel] consensus_record load failed:', crRes.error.message);
+        if (!cancelled) setConsensusRecord(null);
       } else if (!cancelled) {
-        setAiAnalysisResult(null);
+        // eslint-disable-next-line no-console
+        console.log('[ConflictPanel] consensus_record loaded for sprint', sn, ':', crRes.data?.consensus_record);
+        setConsensusRecord(crRes.data?.consensus_record ?? null);
       }
     }
     loadStoredAnalysis();
@@ -2911,7 +2959,13 @@ function ConflictPanel({
       const saved = await onSaveConsensusNote(noteDraft.trim());
       if (saved === false) return;
       setMemoLocked(true);
-      await onReachConsensus();
+      await onReachConsensus({
+        analysis: aiAnalysisResult,
+        manualConflict: conflictDraft.trim(),
+        manualResolution: resolutionDraft.trim(),
+        manualNote: noteDraft.trim(),
+        allParticipants: participants,
+      });
     } finally {
       setSavingMemo(false);
     }
@@ -2926,6 +2980,177 @@ function ConflictPanel({
       && voteMap[authUid] === VOTE_STATUS.APPROVE
       && !allLinkedParticipantsApproved(participants, voteMap)
     );
+
+  const isCompletedSprint =
+    Number.isFinite(sprintNumber) &&
+    Number.isFinite(currentSprintNumber) &&
+    sprintNumber < currentSprintNumber;
+  const showConsensusResultPanel = isCompletedSprint && consensusRecord != null;
+
+  useEffect(() => {
+    // eslint-disable-next-line no-console
+    console.log('[ConflictPanel] state', {
+      sprintNumber,
+      currentSprintNumber,
+      isCompletedSprint,
+      consensusRecord: consensusRecord != null ? 'PRESENT' : 'NULL',
+      showConsensusResultPanel,
+    });
+  }, [sprintNumber, currentSprintNumber, consensusRecord, isCompletedSprint, showConsensusResultPanel]);
+
+  const CR_SECTION_HEADER = { fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', color: C.fg3, marginBottom: 6 };
+  const CR_FIELD_LABEL    = { fontSize: 9,  fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', color: C.fg3, marginBottom: 3 };
+  const CR_VALUE          = { fontSize: 12, color: C.fg1, lineHeight: 1.5 };
+  const CR_SUB_VALUE      = { fontSize: 11, color: C.fg2, lineHeight: 1.55, marginTop: 4, paddingLeft: 8, borderLeft: `2px solid ${C.borderSubtle}` };
+  const CR_EDIT_TEXTAREA  = { width: '100%', minHeight: 48, resize: 'vertical', borderRadius: 4, border: `1px solid ${C.border}`, padding: '6px 8px', fontSize: 11, lineHeight: 1.45, fontFamily: 'inherit', color: C.fg1, outline: 'none' };
+  const CR_EDIT_BTN       = { width: '100%', padding: '9px 12px', borderRadius: 5, border: `1px solid ${C.emeraldBorder}`, background: C.white, color: C.emerald, fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' };
+  const CR_CANCEL_BTN     = { flex: 1, padding: '9px 12px', borderRadius: 5, border: `1px solid ${C.border}`, background: C.white, color: C.fg2, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' };
+  const CR_SAVE_BTN       = { flex: 2, padding: '9px 12px', borderRadius: 5, border: 'none', background: C.emerald, color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' };
+
+  function renderConsensusResultView() {
+    const cr = consensusRecord || {};
+    const resolutionLine = cr.resolution?.title
+      ? cr.resolution.description
+        ? `${cr.resolution.title} — ${cr.resolution.description}`
+        : cr.resolution.title
+      : '—';
+    const conflictLine = cr.conflict?.title ?? cr.conflict?.summary ?? '—';
+    return (
+      <div style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 14, overflowY: 'auto', height: '100%' }}>
+        <div style={CR_SECTION_HEADER}>{t('consensusResultLabel')}</div>
+        <div>
+          <div style={CR_FIELD_LABEL}>{t('drConflict')}</div>
+          <div style={CR_VALUE}>{conflictLine}</div>
+          {cr.conflict?.content ? (
+            <div style={CR_SUB_VALUE}>{cr.conflict.content}</div>
+          ) : null}
+        </div>
+        <div>
+          <div style={CR_FIELD_LABEL}>{t('drResolution')}</div>
+          <div style={CR_VALUE}>{resolutionLine}</div>
+        </div>
+        <div>
+          <div style={CR_FIELD_LABEL}>{t('drNote')}</div>
+          <div style={CR_VALUE}>{cr.note || '—'}</div>
+        </div>
+        <div>
+          <div style={CR_FIELD_LABEL}>{t('drParticipants')}</div>
+          <div style={CR_VALUE}>{(cr.participants || []).join(' · ') || '—'}</div>
+        </div>
+        {isOwner ? (
+          <button
+            type="button"
+            onClick={() => {
+              setEditedConflict(cr.conflict?.title ?? '');
+              setEditedResolution(cr.resolution?.title ?? '');
+              setEditedNote(cr.note ?? '');
+              setIsEditingConsensus(true);
+            }}
+            style={CR_EDIT_BTN}
+          >
+            {t('editDecisionButton')}
+          </button>
+        ) : null}
+      </div>
+    );
+  }
+
+  function renderConsensusEditView() {
+    const cr = consensusRecord || {};
+    return (
+      <div style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 12, overflowY: 'auto', height: '100%' }}>
+        <div style={CR_SECTION_HEADER}>{t('consensusResultLabel')}</div>
+        <div>
+          <div style={CR_FIELD_LABEL}>{t('drConflict')}</div>
+          <textarea
+            value={editedConflict}
+            onChange={(e) => setEditedConflict(e.target.value)}
+            placeholder={t('drConflictPlaceholder')}
+            style={CR_EDIT_TEXTAREA}
+          />
+        </div>
+        <div>
+          <div style={CR_FIELD_LABEL}>{t('drResolution')}</div>
+          <textarea
+            value={editedResolution}
+            onChange={(e) => setEditedResolution(e.target.value)}
+            placeholder={t('drResolutionPlaceholder')}
+            style={CR_EDIT_TEXTAREA}
+          />
+        </div>
+        <div>
+          <div style={CR_FIELD_LABEL}>{t('drNote')}</div>
+          <textarea
+            value={editedNote}
+            onChange={(e) => setEditedNote(e.target.value)}
+            placeholder={t('consensusNotePlaceholder')}
+            style={CR_EDIT_TEXTAREA}
+          />
+        </div>
+        <div>
+          <div style={CR_FIELD_LABEL}>{t('drParticipants')}</div>
+          <div style={CR_VALUE}>{(cr.participants || []).join(' · ') || '—'}</div>
+        </div>
+        <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+          <button
+            type="button"
+            onClick={() => setIsEditingConsensus(false)}
+            style={CR_CANCEL_BTN}
+          >
+            {t('cancelEditButton')}
+          </button>
+          <button
+            type="button"
+            disabled={savingConsensus}
+            onClick={async () => {
+              setSavingConsensus(true);
+              try {
+                const updated = {
+                  ...cr,
+                  conflict: { ...(cr.conflict || {}), title: editedConflict.trim() },
+                  resolution: { ...(cr.resolution || {}), title: editedResolution.trim() },
+                  note: editedNote.trim(),
+                  savedAt: new Date().toISOString(),
+                };
+                const ok = await onSaveConsensusRecord?.(updated);
+                if (ok !== false) {
+                  setConsensusRecord(updated);
+                  setIsEditingConsensus(false);
+                  await onAdvanceViewingSprint?.();
+                }
+              } finally {
+                setSavingConsensus(false);
+              }
+            }}
+            style={{ ...CR_SAVE_BTN, opacity: savingConsensus ? 0.6 : 1, cursor: savingConsensus ? 'wait' : 'pointer' }}
+          >
+            {savingConsensus ? '…' : t('saveAndContinueButton')}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (showConsensusResultPanel) {
+    return (
+      <div
+        style={{
+          width,
+          background: C.white,
+          borderLeft: `1px solid ${C.borderSubtle}`,
+          display: 'flex',
+          flexDirection: 'column',
+          minHeight: 0,
+          flexShrink: 0,
+          minWidth: 0,
+          position: 'relative',
+          zIndex: 0,
+        }}
+      >
+        {isEditingConsensus ? renderConsensusEditView() : renderConsensusResultView()}
+      </div>
+    );
+  }
 
   return (
     <div
@@ -2942,6 +3167,11 @@ function ConflictPanel({
         zIndex: 0,
       }}
     >
+      {isCompletedSprint && consensusRecord == null ? (
+        <div style={{ padding: 10, fontSize: 11, color: C.fg3, textAlign: 'center', background: '#FFF8E1', borderBottom: `1px solid ${C.borderSubtle}` }}>
+          No consensus record saved for this sprint. (Check sprint_ai_analysis.consensus_record migration.)
+        </div>
+      ) : null}
       <div
         style={{
           flex: 1,
@@ -2973,6 +3203,18 @@ function ConflictPanel({
               boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
             }}
           >
+            <div
+              style={{
+                fontSize: 10,
+                fontWeight: 600,
+                textTransform: 'uppercase',
+                letterSpacing: '0.08em',
+                color: C.fg3,
+                marginBottom: 8,
+              }}
+            >
+              {t('aiAnalysisLabel')}
+            </div>
             {isOwner ? (
               <button
                 type="button"
@@ -3651,7 +3893,7 @@ function ConflictPanel({
                   style={{
                     paddingTop: 8,
                     marginTop: 2,
-                    borderTop: `1px solid rgba(30,138,90,0.25)`,
+                    borderTop: `1px solid rgba(6,182,212,0.25)`,
                     minWidth: 0,
                   }}
                 >
@@ -3792,7 +4034,7 @@ function ConflictPanel({
 
         <div
           style={{
-            flex: '0 0 150px',
+            flex: '0 0 auto',
             minHeight: 0,
             display: 'flex',
             flexDirection: 'column',
@@ -3800,56 +4042,128 @@ function ConflictPanel({
             background: C.subtle,
             borderBottom: `1px solid ${C.borderSubtle}`,
             position: 'relative',
+            gap: 6,
           }}
         >
-          <textarea
-            aria-label={t('consensusNotePlaceholder')}
-            readOnly={memoLocked}
-            placeholder={t('consensusNotePlaceholder')}
-            value={noteDraft}
-            onChange={(e) => setNoteDraft(e.target.value)}
+          <div
             style={{
-              flex: 1,
-              minHeight: 0,
-              width: '100%',
-              resize: 'none',
-              borderRadius: 4,
-              border: `1px solid ${C.border}`,
-              padding: memoLocked ? '8px 10px 28px 10px' : '8px 10px',
-              fontSize: 11,
-              lineHeight: 1.45,
-              fontFamily: 'inherit',
-              color: C.fg1,
-              background: memoLocked ? C.subtle : C.white,
-              outline: 'none',
-              cursor: memoLocked ? 'default' : 'text',
+              fontSize: 10,
+              fontWeight: 600,
+              textTransform: 'uppercase',
+              letterSpacing: '0.08em',
+              color: C.fg3,
+              marginBottom: 2,
             }}
-          />
-          {memoLocked ? (
-            <button
-              type="button"
-              title={t('consensusEditMemo')}
-              aria-label={t('consensusEditMemo')}
-              onClick={() => setMemoLocked(false)}
+          >
+            {t('manualInputLabel')}
+          </div>
+          {/* CONFLICT field */}
+          <div>
+            <div style={{ fontSize: 9, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', color: C.fg3, marginBottom: 3 }}>
+              {t('drConflict')}
+            </div>
+            <textarea
+              readOnly={memoLocked}
+              placeholder={t('drConflictPlaceholder')}
+              value={conflictDraft}
+              onChange={(e) => setConflictDraft(e.target.value)}
               style={{
-                position: 'absolute',
-                right: 18,
-                bottom: 16,
-                width: 28,
-                height: 28,
-                borderRadius: 6,
+                width: '100%',
+                height: 44,
+                resize: 'none',
+                borderRadius: 4,
                 border: `1px solid ${C.border}`,
-                background: C.white,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                cursor: 'pointer',
-                boxShadow: '0 1px 3px rgba(30,42,53,0.08)',
+                padding: '6px 8px',
+                fontSize: 11,
+                lineHeight: 1.45,
+                fontFamily: 'inherit',
+                color: C.fg1,
+                background: memoLocked ? C.subtle : C.white,
+                outline: 'none',
+                cursor: memoLocked ? 'default' : 'text',
               }}
-            >
-              <Icon name="pencil" size={13} color={C.fg2} />
-            </button>
-          ) : null}
+            />
+          </div>
+          {/* RESOLUTION field */}
+          <div>
+            <div style={{ fontSize: 9, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', color: C.fg3, marginBottom: 3 }}>
+              {t('drResolution')}
+            </div>
+            <textarea
+              readOnly={memoLocked}
+              placeholder={t('drResolutionPlaceholder')}
+              value={resolutionDraft}
+              onChange={(e) => setResolutionDraft(e.target.value)}
+              style={{
+                width: '100%',
+                height: 44,
+                resize: 'none',
+                borderRadius: 4,
+                border: `1px solid ${C.border}`,
+                padding: '6px 8px',
+                fontSize: 11,
+                lineHeight: 1.45,
+                fontFamily: 'inherit',
+                color: C.fg1,
+                background: memoLocked ? C.subtle : C.white,
+                outline: 'none',
+                cursor: memoLocked ? 'default' : 'text',
+              }}
+            />
+          </div>
+          {/* NOTE field */}
+          <div style={{ position: 'relative' }}>
+            <div style={{ fontSize: 9, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', color: C.fg3, marginBottom: 3 }}>
+              {t('drNote')}
+            </div>
+            <textarea
+              aria-label={t('consensusNotePlaceholder')}
+              readOnly={memoLocked}
+              placeholder={t('consensusNotePlaceholder')}
+              value={noteDraft}
+              onChange={(e) => setNoteDraft(e.target.value)}
+              style={{
+                width: '100%',
+                height: memoLocked ? 52 : 44,
+                resize: 'none',
+                borderRadius: 4,
+                border: `1px solid ${C.border}`,
+                padding: memoLocked ? '6px 32px 6px 8px' : '6px 8px',
+                fontSize: 11,
+                lineHeight: 1.45,
+                fontFamily: 'inherit',
+                color: C.fg1,
+                background: memoLocked ? C.subtle : C.white,
+                outline: 'none',
+                cursor: memoLocked ? 'default' : 'text',
+              }}
+            />
+            {memoLocked ? (
+              <button
+                type="button"
+                title={t('consensusEditMemo')}
+                aria-label={t('consensusEditMemo')}
+                onClick={() => setMemoLocked(false)}
+                style={{
+                  position: 'absolute',
+                  right: 6,
+                  bottom: 6,
+                  width: 22,
+                  height: 22,
+                  borderRadius: 4,
+                  border: `1px solid ${C.border}`,
+                  background: C.white,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  boxShadow: '0 1px 3px rgba(30,42,53,0.08)',
+                }}
+              >
+                <Icon name="pencil" size={11} color={C.fg2} />
+              </button>
+            ) : null}
+          </div>
         </div>
       </div>
 
@@ -3910,6 +4224,7 @@ const TIMELINE_FADE_W = 44;
 function SprintTimelinePanel({
   timelineAnchorSeed,
   currentSprint,
+  projectMetaLoading = false,
   viewingSprint,
   onSprintSelect,
   onRequestDeleteSprint,
@@ -3999,6 +4314,38 @@ function SprintTimelinePanel({
   const atLeftEnd = overflow <= 0 || scrollX >= -0.5;
   const atRightEnd = overflow <= 0 || scrollX <= minScrollX + 0.5;
   const showScrollChrome = overflow > 0;
+
+  if (projectMetaLoading) {
+    return (
+      <div
+        style={{
+          flex: '1 1 0%',
+          minWidth: 0,
+          width: '100%',
+          height: TIMELINE_ROW_H,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <style>{`
+          @keyframes tl-spin {
+            from { transform: rotate(0deg); }
+            to   { transform: rotate(360deg); }
+          }
+        `}</style>
+        <img
+          src="/assets/logo3.png"
+          alt="loading"
+          style={{
+            width: 24,
+            height: 24,
+            animation: 'tl-spin 1s linear infinite',
+          }}
+        />
+      </div>
+    );
+  }
 
   return (
     <div
@@ -4106,7 +4453,7 @@ function SprintTimelinePanel({
                     alignItems: 'center',
                     justifyContent: 'center',
                     boxShadow: isCurrent
-                      ? '0 0 0 4px rgba(30,138,90,0.18), 0 2px 6px rgba(30,138,90,0.25)'
+                      ? '0 0 0 4px rgba(6,182,212,0.18), 0 2px 6px rgba(6,182,212,0.25)'
                       : isViewing
                       ? '0 0 0 3px rgba(58,74,88,0.2)'
                       : 'none',
@@ -4134,7 +4481,7 @@ function SprintTimelinePanel({
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      boxShadow: '0 1px 3px rgba(30,138,90,0.35)',
+                      boxShadow: '0 1px 3px rgba(6,182,212,0.35)',
                     }}
                   >
                     <Icon name="check" size={8} color="#fff" />
@@ -4276,8 +4623,10 @@ export default function WorkspacePage() {
   const { t } = useLang();
   const navigate = useNavigate();
   const { projectId } = useParams();
+  const [searchParams] = useSearchParams();
   const fallbackProject = getProjectById(projectId) || DEFAULT_PROJECT;
   const [projectMeta, setProjectMeta] = useState(null);
+  const [projectMetaLoading, setProjectMetaLoading] = useState(true);
   const [savingMeta, setSavingMeta] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [editingSprint, setEditingSprint] = useState(false);
@@ -4289,6 +4638,8 @@ export default function WorkspacePage() {
   const [designImage, setDesignImage] = useState({ id: null, url: '', storagePath: '' });
   const [uploadState, setUploadState] = useState({ status: 'idle', message: '' });
   const [viewingSprint, setViewingSprint] = useState(null);
+  const [consensusModalData, setConsensusModalData] = useState(null);
+  const hasAppliedUrlSprintRef = useRef(false);
   const [deleteSprintTarget, setDeleteSprintTarget] = useState(null);
   const [chatWidth, setChatWidth] = useState(230);
   const [conflictWidth, setConflictWidth] = useState(230);
@@ -4314,27 +4665,33 @@ export default function WorkspacePage() {
     async function loadProjectMeta() {
       if (!projectId) {
         setProjectMeta(null);
+        setProjectMetaLoading(false);
         return;
       }
 
-      const { data, error } = await supabase
-        .from('projects')
-        .select(
-          'id, name, description, description_short, description_detail, north_star, progress, sprint_number, consensus_note, user_id, is_completed, start_date, due_date, priority_aesthetics_functionality, priority_cost_quality, priority_speed_stability',
-        )
-        .eq('id', projectId)
-        .single();
+      setProjectMetaLoading(true);
+      try {
+        const { data, error } = await supabase
+          .from('projects')
+          .select(
+            'id, name, description, description_short, description_detail, north_star, progress, sprint_number, consensus_note, user_id, is_completed, start_date, due_date, priority_aesthetics_functionality, priority_cost_quality, priority_speed_stability',
+          )
+          .eq('id', projectId)
+          .single();
 
-      if (import.meta.env.DEV) {
-        console.log('[WorkspacePage] raw query result', data, error);
-      }
+        if (import.meta.env.DEV) {
+          console.log('[WorkspacePage] raw query result', data, error);
+        }
 
-      if (!alive) return;
-      if (error || !data) {
-        setProjectMeta(null);
-        return;
+        if (!alive) return;
+        if (error || !data) {
+          setProjectMeta(null);
+        } else {
+          setProjectMeta(data);
+        }
+      } finally {
+        if (alive) setProjectMetaLoading(false);
       }
-      setProjectMeta(data);
     }
 
     loadProjectMeta();
@@ -4365,10 +4722,14 @@ export default function WorkspacePage() {
     }
     return v;
   })();
-  const conflictPanelSprintNumber =
-    Number.isFinite(workspaceCanonicalSprint) && workspaceCanonicalSprint >= 1
-      ? Math.trunc(workspaceCanonicalSprint)
-      : null;
+  const conflictPanelSprintNumber = (() => {
+    const v = Number(viewingSprint);
+    if (Number.isFinite(v) && v >= 1) return Math.trunc(v);
+    if (Number.isFinite(workspaceCanonicalSprint) && workspaceCanonicalSprint >= 1) {
+      return Math.trunc(workspaceCanonicalSprint);
+    }
+    return null;
+  })();
 
   const conflictPanelIsOwner = Boolean(
     workspaceAuthUid &&
@@ -4405,6 +4766,8 @@ export default function WorkspacePage() {
 
   useEffect(() => {
     setViewingSprint(null);
+    hasAppliedUrlSprintRef.current = false;
+    setProjectMetaLoading(true);
   }, [projectId]);
 
   useEffect(() => {
@@ -4426,6 +4789,21 @@ export default function WorkspacePage() {
       return prev;
     });
   }, [projectId, projectMeta?.sprint_number, fallbackProject.sprint]);
+
+  useEffect(() => {
+    if (!projectId) return;
+    if (hasAppliedUrlSprintRef.current) return;
+
+    const urlSprint = Math.trunc(Number(searchParams.get('sprint')));
+    if (!Number.isFinite(urlSprint) || urlSprint < 1) return;
+
+    const current = Math.trunc(Number(projectMeta?.sprint_number ?? fallbackProject.sprint ?? 0));
+    if (!Number.isFinite(current) || current < 1) return;
+    if (urlSprint > current) return;
+
+    hasAppliedUrlSprintRef.current = true;
+    setViewingSprint(urlSprint);
+  }, [projectId, projectMeta?.sprint_number, fallbackProject.sprint, searchParams]);
 
   useEffect(() => {
     if (!projectId) return undefined;
@@ -4498,6 +4876,51 @@ export default function WorkspacePage() {
       description_short: nextDescription,
       description: nextDescription,
     });
+  }
+
+  async function fetchExistingAnalysisResult(sn) {
+    if (!projectId || !sn) return {};
+    const { data } = await supabase
+      .from('sprint_ai_analysis')
+      .select('analysis_result')
+      .eq('project_id', projectId)
+      .eq('sprint_number', sn)
+      .maybeSingle();
+    return data?.analysis_result ?? {};
+  }
+
+  async function fetchConsensusDisplayData(sn) {
+    if (!projectId || !sn || sn < 1) return { approverNames: [], consensusNote: '' };
+    const [votesRes, metaRes] = await Promise.all([
+      supabase
+        .from('sprint_votes')
+        .select('user_id, vote')
+        .eq('project_id', projectId)
+        .eq('sprint_number', sn)
+        .eq('vote', 'approve'),
+      supabase
+        .from('projects')
+        .select('consensus_note')
+        .eq('id', projectId)
+        .single(),
+    ]);
+    const ids = (votesRes.data || [])
+      .map((v) => normalizeParticipantUserId(v.user_id))
+      .filter(Boolean);
+    let approverNames = [];
+    if (ids.length > 0) {
+      const { profileFullNameById } = await fetchProfileFullNamesMap(supabase, ids);
+      approverNames = ids.map((id) => profileFullNameById[id] || id);
+    }
+    return {
+      approverNames,
+      consensusNote: metaRes.data?.consensus_note ?? '',
+    };
+  }
+
+  async function handleConsensusModalClose() {
+    setConsensusModalData(null);
+    await handleAddSprint();
   }
 
   async function handleAddSprint() {
@@ -5161,6 +5584,7 @@ export default function WorkspacePage() {
             onDeleteImage={onDeleteImage}
             uploadState={uploadState}
             currentSprint={projectMeta?.sprint_number ?? fallbackProject.sprint ?? 0}
+            projectMetaLoading={projectMetaLoading}
             viewingSprint={viewingSprint}
             onSprintSelect={handleSprintSelect}
             onRequestDeleteSprint={(sprintNumber) => setDeleteSprintTarget(sprintNumber)}
@@ -5275,13 +5699,141 @@ export default function WorkspacePage() {
           ownerUserId={projectMeta?.user_id ?? null}
           consensusNote={projectMeta?.consensus_note ?? ''}
           onSaveConsensusNote={(text) => updateProjectFields({ consensus_note: text })}
-          onApprove={async () => {
-            await handleAddSprint();
-            navigate(`/project/${resolvedProject.id}/consensus`);
+          onApprove={async (analysis) => {
+            const sn = workspaceCanonicalSprint;
+            const { approverNames } = await fetchConsensusDisplayData(sn);
+            const record = {
+              conflict: {
+                title:   analysis?.activeConflict?.title    ?? null,
+                summary: analysis?.activeConflict?.summary  ?? null,
+                content: analysis?.activeConflict?.content  ?? null,
+              },
+              resolution: {
+                title:       analysis?.alternative?.title       ?? null,
+                description: analysis?.alternative?.description ?? null,
+              },
+              note: t('drAiConsensusNote'),
+              participants: approverNames,
+              isAiPath: true,
+              savedAt: new Date().toISOString(),
+            };
+            if (projectId && sn) {
+              const existingAnalysis = await fetchExistingAnalysisResult(sn);
+              const { error } = await supabase.from('sprint_ai_analysis').upsert(
+                {
+                  project_id: projectId,
+                  sprint_number: sn,
+                  analysis_result: analysis ?? existingAnalysis ?? {},
+                  consensus_record: record,
+                  updated_at: record.savedAt,
+                  created_by: workspaceAuthUid,
+                },
+                { onConflict: 'project_id,sprint_number' },
+              );
+              if (error) {
+                // eslint-disable-next-line no-console
+                console.error('[WorkspacePage] save consensus_record (ai) FAILED', { sprint: sn, error });
+              } else {
+                // eslint-disable-next-line no-console
+                console.log('[WorkspacePage] save consensus_record (ai) OK for sprint', sn);
+              }
+            }
+            setConsensusModalData({
+              conflictTitle:   record.conflict.title,
+              conflictSummary: record.conflict.summary,
+              conflictContent: record.conflict.content,
+              resolutionTitle: record.resolution.title,
+              resolutionDesc:  record.resolution.description,
+              approverNames,
+              consensusNote: record.note,
+              sprintNumber: sn,
+              isAiPath: true,
+            });
           }}
-          onReachConsensus={async () => {
-            await handleAddSprint();
-            navigate(`/project/${resolvedProject.id}/consensus`);
+          onReachConsensus={async ({ analysis, manualConflict, manualResolution, manualNote, allParticipants }) => {
+            const sn = workspaceCanonicalSprint;
+            const participantNames = (allParticipants || []).map((p) => p.label).filter(Boolean);
+            const record = {
+              conflict: {
+                title:   manualConflict || (analysis?.activeConflict?.title ?? null),
+                summary: null,
+                content: null,
+              },
+              resolution: {
+                title:       manualResolution || (analysis?.alternative?.title ?? null),
+                description: null,
+              },
+              note: manualNote,
+              participants: participantNames,
+              isAiPath: false,
+              savedAt: new Date().toISOString(),
+            };
+            if (projectId && sn) {
+              const existingAnalysis = await fetchExistingAnalysisResult(sn);
+              const { error } = await supabase.from('sprint_ai_analysis').upsert(
+                {
+                  project_id: projectId,
+                  sprint_number: sn,
+                  analysis_result: analysis ?? existingAnalysis ?? {},
+                  consensus_record: record,
+                  updated_at: record.savedAt,
+                  created_by: workspaceAuthUid,
+                },
+                { onConflict: 'project_id,sprint_number' },
+              );
+              if (error) {
+                // eslint-disable-next-line no-console
+                console.error('[WorkspacePage] save consensus_record (manual) FAILED', { sprint: sn, error });
+              } else {
+                // eslint-disable-next-line no-console
+                console.log('[WorkspacePage] save consensus_record (manual) OK for sprint', sn);
+              }
+            }
+            setConsensusModalData({
+              conflictTitle:   record.conflict.title,
+              conflictSummary: null,
+              conflictContent: null,
+              resolutionTitle: record.resolution.title,
+              resolutionDesc:  null,
+              approverNames:   participantNames,
+              consensusNote:   manualNote,
+              sprintNumber:    sn,
+              isAiPath:        false,
+            });
+          }}
+          currentSprintNumber={workspaceCanonicalSprint}
+          onSaveConsensusRecord={async (record) => {
+            const sn = conflictPanelSprintNumber;
+            if (!projectId || !sn) return false;
+            const existingAnalysis = await fetchExistingAnalysisResult(sn);
+            const { error } = await supabase.from('sprint_ai_analysis').upsert(
+              {
+                project_id: projectId,
+                sprint_number: sn,
+                analysis_result: existingAnalysis ?? {},
+                consensus_record: record,
+                updated_at: new Date().toISOString(),
+                created_by: workspaceAuthUid,
+              },
+              { onConflict: 'project_id,sprint_number' },
+            );
+            if (error) {
+              // eslint-disable-next-line no-console
+              console.error('[WorkspacePage] update consensus_record FAILED', { sprint: sn, error });
+              return false;
+            }
+            // eslint-disable-next-line no-console
+            console.log('[WorkspacePage] update consensus_record OK for sprint', sn);
+            return true;
+          }}
+          onAdvanceViewingSprint={async () => {
+            const current = workspaceCanonicalSprint;
+            const target = (conflictPanelSprintNumber ?? 0) + 1;
+            if (target > current) {
+              await handleAddSprint();
+            } else {
+              setViewingSprint(target);
+            }
           }}
           onReject={() => {}}
           geminiProject={{
@@ -5297,6 +5849,14 @@ export default function WorkspacePage() {
           isOwner={conflictPanelIsOwner}
         />
       </div>
+      {consensusModalData && (
+        <ConsensusModal
+          data={consensusModalData}
+          project={resolvedProject}
+          onClose={handleConsensusModalClose}
+        />
+      )}
+
       {deleteSprintTarget ? (
         <div
           role="presentation"

@@ -4,7 +4,7 @@
 
 // Per-team accent dot used in the project grid.
 export const TEAM_DOT = {
-  'Hardware Core':     '#1E8A5A', // emerald
+  'Hardware Core':     '#06b6d4', // cyan
   'Industrial Design': '#3A6EA5', // blue
   'Electronics':       '#7F56D9', // violet
   'Structural':        '#D05045', // coral
