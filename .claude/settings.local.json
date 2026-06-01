@@ -5,7 +5,18 @@
       "Bash(Remove-Item -Recurse -Force node_modules/.vite -ErrorAction SilentlyContinue)",
       "PowerShell(node -e \"const {Jimp}=require\\('jimp'\\); const j=new Jimp\\({width:1,height:1}\\); console.log\\(Object.getOwnPropertyNames\\(Object.getPrototypeOf\\(j\\)\\).filter\\(k=>k.includes\\('write'\\)||k.includes\\('save'\\)\\)\\)\")",
       "Bash(grep -E \"\\\\.\\(jsx|tsx|js|ts\\)$\")",
-      "Bash(grep -E \"\\\\.\\(jsx|tsx|json\\)$\")"
+      "Bash(grep -E \"\\\\.\\(jsx|tsx|json\\)$\")",
+      "Bash(ping -n 3 127.0.0.1)",
+      "Bash(curl -s http://localhost:5173 -o nul -w \"%{http_code}\")",
+      "Bash(node *)",
+      "Bash(curl *)",
+      "mcp__claude_ai_Supabase__list_projects",
+      "mcp__claude_ai_Supabase__apply_migration",
+      "Bash(npx eslint *)",
+      "Bash(npx vite *)",
+      "mcp__claude_ai_Supabase__execute_sql",
+      "Bash(awk 'NR==8967,/^        \\\\/>/' \"src/pages/WorkspacePage.jsx\")",
+      "Bash(findstr *)"
     ]
   }
 }

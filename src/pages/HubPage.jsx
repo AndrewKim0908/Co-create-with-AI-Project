@@ -370,7 +370,7 @@ export default function HubPage({ user }) {
     const ownedQuery = supabase
       .from('projects')
       .select(
-        'id, user_id, name, progress, is_completed, description, description_short, description_detail, north_star, sprint_number, created_at, start_date, due_date, priority_aesthetics_functionality, priority_cost_quality, priority_speed_stability',
+        'id, user_id, name, progress, is_completed, description, description_short, description_detail, north_star, sprint_number, created_at, start_date, due_date, priority_aesthetics_functionality, priority_cost_quality, priority_speed_stability, priorities',
       )
       .eq('user_id', user.id)
       .order('created_at', { ascending: false });
@@ -404,7 +404,7 @@ export default function HubPage({ user }) {
           const invitedProjectsQuery = supabase
             .from('projects')
             .select(
-              'id, user_id, name, progress, is_completed, description, description_short, description_detail, north_star, sprint_number, created_at, start_date, due_date, priority_aesthetics_functionality, priority_cost_quality, priority_speed_stability',
+              'id, user_id, name, progress, is_completed, description, description_short, description_detail, north_star, sprint_number, created_at, start_date, due_date, priority_aesthetics_functionality, priority_cost_quality, priority_speed_stability, priorities',
             )
             .in('id', invitedIds)
             .order('created_at', { ascending: false });
@@ -534,9 +534,10 @@ export default function HubPage({ user }) {
         description: updates.descriptionShort,
         description_detail: updates.descriptionDetail || null,
         north_star: updates.northStar,
-        priority_aesthetics_functionality: updates.priorityAestheticsFunctionality,
-        priority_cost_quality: updates.priorityCostQuality,
-        priority_speed_stability: updates.prioritySpeedStability,
+        priorities: updates.priorities ?? null,
+        priority_aesthetics_functionality: null,
+        priority_cost_quality: null,
+        priority_speed_stability: null,
         start_date: start,
         due_date: due,
         progress: nextProgress,

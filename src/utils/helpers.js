@@ -1,27 +1,5 @@
-const USER_COLOR_PALETTE = [
-  '#10B981',
-  '#3A6EA5',
-  '#8B5CF6',
-  '#F59E0B',
-  '#EF4444',
-  '#14B8A6',
-  '#EC4899',
-  '#6366F1',
-  '#22C55E',
-  '#0EA5E9',
-];
-
-export function getUserColor(email) {
-  const normalized = String(email || '').trim().toLowerCase();
-  if (!normalized) return '#64748B';
-  let hash = 0;
-  for (let i = 0; i < normalized.length; i += 1) {
-    hash = ((hash << 5) - hash) + normalized.charCodeAt(i);
-    hash |= 0;
-  }
-  const idx = Math.abs(hash) % USER_COLOR_PALETTE.length;
-  return USER_COLOR_PALETTE[idx];
-}
+// User colors are now centralized in src/utils/userColors.js (email-keyed,
+// viewer-relative). The old email-hash getUserColor here has been retired.
 
 export function isEditableKeyboardTarget(target) {
   if (!target || typeof target !== 'object') return false;
@@ -95,9 +73,10 @@ export function normalizeParticipantUserId(id) {
 }
 
 /**
- * Member list label: prefer signup full_name (auth user_metadata for the current user;
- * for others, public.profiles.full_name when the project mirrors auth — common Supabase pattern).
- * Otherwise email local-part before @.
+ * Member list label: prefer public.profiles.full_name (the canonical store the app writes to
+ * when a user updates their name in SettingsModal). Fall back to auth user_metadata.full_name
+ * for the current user only — that field is only useful as a seed before profiles has loaded
+ * or for legacy accounts that pre-date the profiles row. Last resort is the email local-part.
  */
 export function participantVoteDisplayName({
   userId,
@@ -113,10 +92,14 @@ export function participantVoteDisplayName({
   }
   const selfNorm = normalizeParticipantUserId(authSelfId);
   const isSelf = selfNorm !== null && uidNorm === selfNorm;
-  const selfNm = String(authSelfFullName || '').trim();
   const prof = String(profileFullNameById[uidNorm] || '').trim();
-  if (isSelf && selfNm) return selfNm;
+  // profiles is authoritative for everyone, including self — SettingsModal writes here.
   if (prof) return prof;
+  // Auth metadata is now only a fallback for self when profiles hasn't been populated yet.
+  if (isSelf) {
+    const selfNm = String(authSelfFullName || '').trim();
+    if (selfNm) return selfNm;
+  }
   if (local) return local;
   return `${uidNorm.slice(0, 8)}…`;
 }

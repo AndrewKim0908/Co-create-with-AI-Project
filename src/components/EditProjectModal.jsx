@@ -1,8 +1,13 @@
 import { useEffect, useState } from 'react';
 import Btn from '@/components/Btn';
+import ConflictPrioritySection, {
+  stripIds,
+  withIds,
+} from '@/components/ConflictPrioritySection';
 import { C } from '@/constants/colors';
 import { useLang } from '@/i18n/LangContext';
 import { projectShortDescription } from '@/utils/projectDisplay';
+import { getProjectPriorities } from '@/utils/projectPriorities';
 import { isDueDateBeforeStart } from '@/utils/projectProgress';
 
 const INITIAL_FORM = {
@@ -12,14 +17,7 @@ const INITIAL_FORM = {
   northStar: '',
   startDate: '',
   dueDate: '',
-  priorityAestheticsFunctionality: 50,
-  priorityCostQuality: 50,
-  prioritySpeedStability: 50,
 };
-
-function interpolate(template, pct) {
-  return String(template || '').replace(/\{\{pct\}\}/g, String(pct));
-}
 
 function rowToForm(row) {
   if (!row || typeof row !== 'object') return { ...INITIAL_FORM };
@@ -28,107 +26,9 @@ function rowToForm(row) {
     descriptionShort: projectShortDescription(row),
     descriptionDetail: row.description_detail != null ? String(row.description_detail) : '',
     northStar: row.north_star != null ? String(row.north_star) : '',
-    priorityAestheticsFunctionality: Math.min(
-      100,
-      Math.max(0, Math.round(Number(row.priority_aesthetics_functionality) || 50)),
-    ),
-    priorityCostQuality: Math.min(
-      100,
-      Math.max(0, Math.round(Number(row.priority_cost_quality) || 50)),
-    ),
-    prioritySpeedStability: Math.min(
-      100,
-      Math.max(0, Math.round(Number(row.priority_speed_stability) || 50)),
-    ),
     startDate: row.start_date ? String(row.start_date).slice(0, 10) : '',
     dueDate: row.due_date ? String(row.due_date).slice(0, 10) : '',
   };
-}
-
-function PrioritySliderRow({
-  value,
-  onChange,
-  leftHint,
-  rightHint,
-  labelLeft,
-  labelRight,
-  balancedLabel,
-  disabled,
-}) {
-  const label =
-    value === 50
-      ? balancedLabel
-      : value > 50
-        ? interpolate(labelRight, value)
-        : interpolate(labelLeft, 100 - value);
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          gap: 8,
-          fontSize: 10,
-          color: C.fg3,
-        }}
-      >
-        <span style={{ flex: 1 }}>{leftHint}</span>
-        <span
-          style={{
-            fontSize: 11,
-            fontWeight: 600,
-            color: C.fg2,
-            whiteSpace: 'nowrap',
-            minWidth: 120,
-            textAlign: 'center',
-          }}
-        >
-          {label}
-        </span>
-        <span style={{ flex: 1, textAlign: 'right' }}>{rightHint}</span>
-      </div>
-      <div
-        style={{
-          position: 'relative',
-          height: 22,
-          display: 'flex',
-          alignItems: 'center',
-        }}
-      >
-        <div
-          aria-hidden
-          style={{
-            position: 'absolute',
-            left: 0,
-            right: 0,
-            height: 6,
-            borderRadius: 3,
-            background: 'linear-gradient(to right, #3A6EA5 0%, #06b6d4 100%)',
-            pointerEvents: 'none',
-          }}
-        />
-        <input
-          type="range"
-          min={0}
-          max={100}
-          step={1}
-          value={value}
-          disabled={disabled}
-          onChange={(e) => onChange(Number(e.target.value))}
-          style={{
-            position: 'relative',
-            width: '100%',
-            height: 22,
-            margin: 0,
-            background: 'transparent',
-            accentColor: value <= 50 ? '#3A6EA5' : '#06b6d4',
-          }}
-        />
-      </div>
-    </div>
-  );
 }
 
 function SectionTitle({ children }) {
@@ -148,20 +48,22 @@ function SectionTitle({ children }) {
 }
 
 /**
- * @param {boolean} [open] — modal visibility (`isOpen` accepted as alias)
+ * @param {boolean} [open]
  * @param {() => void} onClose
  * @param {object | null} project — raw `projects` row from Supabase
- * @param {(projectId: string, updates: object) => Promise<boolean>} onSave — return true on success
+ * @param {(projectId: string, updates: object) => Promise<boolean>} onSave
  */
 export default function EditProjectModal({ open, isOpen, onClose, project, onSave }) {
   const visible = open ?? isOpen ?? false;
   const { t } = useLang();
   const [form, setForm] = useState(() => ({ ...INITIAL_FORM }));
+  const [priorities, setPriorities] = useState([]);
   const [saveState, setSaveState] = useState({ status: 'idle', message: '' });
 
   useEffect(() => {
     if (visible && project) {
       setForm(rowToForm(project));
+      setPriorities(withIds(getProjectPriorities(project)));
       setSaveState({ status: 'idle', message: '' });
     }
   }, [visible, project]);
@@ -195,10 +97,6 @@ export default function EditProjectModal({ open, isOpen, onClose, project, onSav
       return;
     }
 
-    const pAf = Math.min(100, Math.max(0, Math.round(Number(form.priorityAestheticsFunctionality) || 50)));
-    const pCq = Math.min(100, Math.max(0, Math.round(Number(form.priorityCostQuality) || 50)));
-    const pSs = Math.min(100, Math.max(0, Math.round(Number(form.prioritySpeedStability) || 50)));
-
     const updates = {
       name,
       descriptionShort,
@@ -206,9 +104,7 @@ export default function EditProjectModal({ open, isOpen, onClose, project, onSav
       northStar,
       startDate: sd,
       dueDate: dd,
-      priorityAestheticsFunctionality: pAf,
-      priorityCostQuality: pCq,
-      prioritySpeedStability: pSs,
+      priorities: stripIds(priorities),
     };
 
     setSaveState({ status: 'saving', message: '' });
@@ -380,37 +276,10 @@ export default function EditProjectModal({ open, isOpen, onClose, project, onSav
         {t('newProjectNorthStarHint')}
       </div>
 
-      <SectionTitle>{t('newProjectPrioritySection')}</SectionTitle>
-      <div style={{ fontSize: 11, color: C.fg3, lineHeight: 1.45 }}>{t('newProjectPriorityIntro')}</div>
-
-      <PrioritySliderRow
-        value={form.priorityAestheticsFunctionality}
-        onChange={(v) => setForm((prev) => ({ ...prev, priorityAestheticsFunctionality: v }))}
-        leftHint={t('newProjectPriorityAesthetics')}
-        rightHint={t('newProjectPriorityFunctionality')}
-        labelLeft={t('newProjectPriAfLeft')}
-        labelRight={t('newProjectPriAfRight')}
-        balancedLabel={t('newProjectPriorityBalanced')}
-        disabled={disabled}
-      />
-      <PrioritySliderRow
-        value={form.priorityCostQuality}
-        onChange={(v) => setForm((prev) => ({ ...prev, priorityCostQuality: v }))}
-        leftHint={t('newProjectPriorityCost')}
-        rightHint={t('newProjectPriorityQuality')}
-        labelLeft={t('newProjectPriCqLeft')}
-        labelRight={t('newProjectPriCqRight')}
-        balancedLabel={t('newProjectPriorityBalanced')}
-        disabled={disabled}
-      />
-      <PrioritySliderRow
-        value={form.prioritySpeedStability}
-        onChange={(v) => setForm((prev) => ({ ...prev, prioritySpeedStability: v }))}
-        leftHint={t('newProjectPrioritySpeed')}
-        rightHint={t('newProjectPriorityStability')}
-        labelLeft={t('newProjectPriSsLeft')}
-        labelRight={t('newProjectPriSsRight')}
-        balancedLabel={t('newProjectPriorityBalanced')}
+      <ConflictPrioritySection
+        priorities={priorities}
+        onChange={setPriorities}
+        projectDescription={form.descriptionDetail}
         disabled={disabled}
       />
 

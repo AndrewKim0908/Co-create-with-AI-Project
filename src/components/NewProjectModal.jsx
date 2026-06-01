@@ -1,108 +1,107 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Btn from '@/components/Btn';
+import Icon from '@/components/Icon';
+import ConflictPrioritySection, {
+  makeInitialNewProjectPriorities,
+  stripIds,
+} from '@/components/ConflictPrioritySection';
 import { C } from '@/constants/colors';
 import { useLang } from '@/i18n/LangContext';
 import { supabase } from '@/lib/supabase';
 import { calculateDateProgress, isDueDateBeforeStart } from '@/utils/projectProgress';
 
+const DETAIL_TEMPLATE = `Background:\nUser needs:\nGoals:\nExpected trade-offs:\nProject scope:\nOut of scope:\nSuccess metrics:`;
+
 const INITIAL_FORM = {
   name: '',
   descriptionShort: '',
-  descriptionDetail: '',
+  descriptionDetail: DETAIL_TEMPLATE,
   northStar: '',
   startDate: '',
   dueDate: '',
-  priorityAestheticsFunctionality: 50,
-  priorityCostQuality: 50,
-  prioritySpeedStability: 50,
 };
 
-function interpolate(template, pct) {
-  return String(template || '').replace(/\{\{pct\}\}/g, String(pct));
+const MONTHS = [
+  'January','February','March','April','May','June',
+  'July','August','September','October','November','December',
+];
+
+function parseDateStr(str) {
+  if (!str) return { year: '', month: '', day: '' };
+  const [y, m, d] = str.split('-');
+  return {
+    year: y || '',
+    month: m ? String(Number(m)) : '',
+    day: d ? String(Number(d)) : '',
+  };
 }
 
-function PrioritySliderRow({
-  value,
-  onChange,
-  leftHint,
-  rightHint,
-  labelLeft,
-  labelRight,
-  balancedLabel,
-  disabled,
-}) {
-  const label =
-    value === 50
-      ? balancedLabel
-      : value > 50
-        ? interpolate(labelRight, value)
-        : interpolate(labelLeft, 100 - value);
+function DatePicker({ value, onChange, disabled }) {
+  const [parts, setParts] = useState(() => parseDateStr(value));
+  const prevRef = useRef(value);
+
+  useEffect(() => {
+    if (value !== prevRef.current) {
+      prevRef.current = value;
+      if (!value) setParts({ year: '', month: '', day: '' });
+    }
+  }, [value]);
+
+  function handlePart(field, val) {
+    const next = { ...parts, [field]: val };
+    setParts(next);
+    if (next.year && next.month && next.day) {
+      const yy = String(next.year).padStart(4, '0');
+      const mm = String(next.month).padStart(2, '0');
+      const dd = String(next.day).padStart(2, '0');
+      onChange(`${yy}-${mm}-${dd}`);
+    } else {
+      onChange('');
+    }
+  }
+
+  const base = {
+    border: `1px solid ${C.border}`,
+    borderRadius: 4,
+    height: 36,
+    fontSize: 13,
+    fontFamily: 'inherit',
+    background: disabled ? '#f9fafb' : '#fff',
+  };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          gap: 8,
-          fontSize: 10,
-          color: C.fg3,
-        }}
+    <div style={{ display: 'flex', gap: 6 }}>
+      <select
+        value={parts.month}
+        onChange={(e) => handlePart('month', e.target.value)}
+        disabled={disabled}
+        style={{ ...base, flex: 1, minWidth: 0, padding: '0 6px', color: parts.month ? C.fg1 : C.fg3 }}
       >
-        <span style={{ flex: 1 }}>{leftHint}</span>
-        <span
-          style={{
-            fontSize: 11,
-            fontWeight: 600,
-            color: C.fg2,
-            whiteSpace: 'nowrap',
-            minWidth: 120,
-            textAlign: 'center',
-          }}
-        >
-          {label}
-        </span>
-        <span style={{ flex: 1, textAlign: 'right' }}>{rightHint}</span>
-      </div>
-      <div
-        style={{
-          position: 'relative',
-          height: 22,
-          display: 'flex',
-          alignItems: 'center',
-        }}
-      >
-        <div
-          aria-hidden
-          style={{
-            position: 'absolute',
-            left: 0,
-            right: 0,
-            height: 6,
-            borderRadius: 3,
-            background: 'linear-gradient(to right, #3A6EA5 0%, #06b6d4 100%)',
-            pointerEvents: 'none',
-          }}
-        />
-        <input
-          type="range"
-          min={0}
-          max={100}
-          step={1}
-          value={value}
-          disabled={disabled}
-          onChange={(e) => onChange(Number(e.target.value))}
-          style={{
-            position: 'relative',
-            width: '100%',
-            height: 22,
-            margin: 0,
-            background: 'transparent',
-            accentColor: value <= 50 ? '#3A6EA5' : '#06b6d4',
-          }}
-        />
-      </div>
+        <option value="">Month</option>
+        {MONTHS.map((m, i) => (
+          <option key={i} value={String(i + 1)}>{m}</option>
+        ))}
+      </select>
+      <input
+        type="number"
+        placeholder="DD"
+        min={1}
+        max={31}
+        value={parts.day}
+        onChange={(e) => handlePart('day', e.target.value)}
+        disabled={disabled}
+        style={{ ...base, flex: 1, minWidth: 0, padding: '0 6px', color: parts.day ? C.fg1 : C.fg3 }}
+      />
+      <input
+        type="number"
+        placeholder="YYYY"
+        min={2020}
+        max={2030}
+        value={parts.year}
+        onChange={(e) => handlePart('year', e.target.value)}
+        disabled={disabled}
+        style={{ ...base, flex: 1, minWidth: 0, padding: '0 6px', color: parts.year ? C.fg1 : C.fg3 }}
+      />
     </div>
   );
 }
@@ -135,11 +134,15 @@ export default function NewProjectModal({
 }) {
   const { t } = useLang();
   const [form, setForm] = useState(() => ({ ...INITIAL_FORM }));
+  const [priorities, setPriorities] = useState(() => makeInitialNewProjectPriorities());
   const [saveState, setSaveState] = useState({ status: 'idle', message: '' });
+  const [closeHov, setCloseHov] = useState(false);
+  const detailTextareaRef = useRef(null);
 
   useEffect(() => {
     if (variant === 'modal' && open) {
       setForm({ ...INITIAL_FORM });
+      setPriorities(makeInitialNewProjectPriorities());
       setSaveState({ status: 'idle', message: '' });
     }
   }, [open, variant]);
@@ -147,9 +150,19 @@ export default function NewProjectModal({
   useEffect(() => {
     if (variant === 'embedded') {
       setForm({ ...INITIAL_FORM });
+      setPriorities(makeInitialNewProjectPriorities());
       setSaveState({ status: 'idle', message: '' });
     }
   }, [variant]);
+
+  function handleClose() {
+    const dirty =
+      Object.keys(INITIAL_FORM).some((k) => form[k] !== INITIAL_FORM[k]) ||
+      priorities.length !== 2 ||
+      priorities.some((p) => p.value !== 50 || (p.label !== 'Aesthetics' && p.label !== 'Cost savings'));
+    if (dirty && !window.confirm('작성 중인 내용이 사라집니다. 창을 닫으시겠습니까?')) return;
+    onClose?.();
+  }
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -180,9 +193,7 @@ export default function NewProjectModal({
       return;
     }
 
-    const pAf = Math.min(100, Math.max(0, Math.round(Number(form.priorityAestheticsFunctionality) || 50)));
-    const pCq = Math.min(100, Math.max(0, Math.round(Number(form.priorityCostQuality) || 50)));
-    const pSs = Math.min(100, Math.max(0, Math.round(Number(form.prioritySpeedStability) || 50)));
+    const prioritiesPayload = stripIds(priorities);
 
     setSaveState({ status: 'saving', message: '' });
 
@@ -201,9 +212,10 @@ export default function NewProjectModal({
         north_star: northStar,
         start_date: sd || null,
         due_date: dd || null,
-        priority_aesthetics_functionality: pAf,
-        priority_cost_quality: pCq,
-        priority_speed_stability: pSs,
+        priorities: prioritiesPayload,
+        priority_aesthetics_functionality: null,
+        priority_cost_quality: null,
+        priority_speed_stability: null,
       })
       .select('id')
       .single();
@@ -221,6 +233,7 @@ export default function NewProjectModal({
     }
     setSaveState({ status: 'idle', message: '' });
     setForm({ ...INITIAL_FORM });
+    setPriorities(makeInitialNewProjectPriorities());
     if (variant === 'modal' && onClose) {
       onClose();
     }
@@ -247,7 +260,28 @@ export default function NewProjectModal({
         overflowY: variant === 'modal' ? 'auto' : 'visible',
       }}
     >
-      <div style={{ fontSize: 16, fontWeight: 700, color: C.fg1 }}>{t('newProject')}</div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ fontSize: 16, fontWeight: 700, color: C.fg1 }}>{t('newProject')}</div>
+        <button
+          type="button"
+          onClick={handleClose}
+          disabled={disabled}
+          onMouseEnter={() => setCloseHov(true)}
+          onMouseLeave={() => setCloseHov(false)}
+          style={{
+            background: 'transparent',
+            border: 'none',
+            cursor: disabled ? 'default' : 'pointer',
+            padding: 4,
+            borderRadius: 4,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <Icon name="x" size={18} color={closeHov ? '#4b5563' : '#9ca3af'} />
+        </button>
+      </div>
 
       <SectionTitle>{t('newProjectSectionIdentity')}</SectionTitle>
       <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -290,52 +324,28 @@ export default function NewProjectModal({
       </label>
 
       <SectionTitle>{t('projectTimeline')}</SectionTitle>
-      <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         <span style={{ fontSize: 12, color: C.fg2 }}>{t('projectStartDateOptional')}</span>
-        <input
-          type="date"
+        <DatePicker
           value={form.startDate}
-          onChange={(e) =>
-            setForm((prev) => ({ ...prev, startDate: e.target.value }))
-          }
+          onChange={(v) => setForm((prev) => ({ ...prev, startDate: v }))}
           disabled={disabled}
-          style={{
-            border: `1px solid ${C.border}`,
-            borderRadius: 4,
-            height: 36,
-            padding: '0 10px',
-            fontSize: 13,
-            color: C.fg1,
-            fontFamily: 'inherit',
-          }}
         />
-      </label>
-      <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         <span style={{ fontSize: 12, color: C.fg2 }}>{t('projectDueDateOptional')}</span>
-        <input
-          type="date"
+        <DatePicker
           value={form.dueDate}
-          min={form.startDate || undefined}
-          onChange={(e) =>
-            setForm((prev) => ({ ...prev, dueDate: e.target.value }))
-          }
+          onChange={(v) => setForm((prev) => ({ ...prev, dueDate: v }))}
           disabled={disabled}
-          style={{
-            border: `1px solid ${C.border}`,
-            borderRadius: 4,
-            height: 36,
-            padding: '0 10px',
-            fontSize: 13,
-            color: C.fg1,
-            fontFamily: 'inherit',
-          }}
         />
-      </label>
+      </div>
 
       <SectionTitle>{t('newProjectDetailSection')}</SectionTitle>
       <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         <span style={{ fontSize: 12, color: C.fg2 }}>{t('newProjectDetailLabel')}</span>
         <textarea
+          ref={detailTextareaRef}
           value={form.descriptionDetail}
           onChange={(e) => setForm((prev) => ({ ...prev, descriptionDetail: e.target.value }))}
           placeholder={t('newProjectDetailPlaceholder')}
@@ -378,37 +388,10 @@ export default function NewProjectModal({
         {t('newProjectNorthStarHint')}
       </div>
 
-      <SectionTitle>{t('newProjectPrioritySection')}</SectionTitle>
-      <div style={{ fontSize: 11, color: C.fg3, lineHeight: 1.45 }}>{t('newProjectPriorityIntro')}</div>
-
-      <PrioritySliderRow
-        value={form.priorityAestheticsFunctionality}
-        onChange={(v) => setForm((prev) => ({ ...prev, priorityAestheticsFunctionality: v }))}
-        leftHint={t('newProjectPriorityAesthetics')}
-        rightHint={t('newProjectPriorityFunctionality')}
-        labelLeft={t('newProjectPriAfLeft')}
-        labelRight={t('newProjectPriAfRight')}
-        balancedLabel={t('newProjectPriorityBalanced')}
-        disabled={disabled}
-      />
-      <PrioritySliderRow
-        value={form.priorityCostQuality}
-        onChange={(v) => setForm((prev) => ({ ...prev, priorityCostQuality: v }))}
-        leftHint={t('newProjectPriorityCost')}
-        rightHint={t('newProjectPriorityQuality')}
-        labelLeft={t('newProjectPriCqLeft')}
-        labelRight={t('newProjectPriCqRight')}
-        balancedLabel={t('newProjectPriorityBalanced')}
-        disabled={disabled}
-      />
-      <PrioritySliderRow
-        value={form.prioritySpeedStability}
-        onChange={(v) => setForm((prev) => ({ ...prev, prioritySpeedStability: v }))}
-        leftHint={t('newProjectPrioritySpeed')}
-        rightHint={t('newProjectPriorityStability')}
-        labelLeft={t('newProjectPriSsLeft')}
-        labelRight={t('newProjectPriSsRight')}
-        balancedLabel={t('newProjectPriorityBalanced')}
+      <ConflictPrioritySection
+        priorities={priorities}
+        onChange={setPriorities}
+        projectDescription={form.descriptionDetail}
         disabled={disabled}
       />
 
@@ -421,7 +404,7 @@ export default function NewProjectModal({
           variant="default"
           size="sm"
           type="button"
-          onClick={() => !disabled && onClose?.()}
+          onClick={() => !disabled && handleClose()}
           disabled={disabled}
         >
           {t('hubCreateCancel')}
@@ -442,7 +425,6 @@ export default function NewProjectModal({
   return (
     <div
       role="presentation"
-      onClick={() => !disabled && onClose?.()}
       style={{
         position: 'fixed',
         inset: 0,

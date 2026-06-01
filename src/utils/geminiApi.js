@@ -7,6 +7,8 @@
  * Stable model id: https://ai.google.dev/gemini-api/docs/models/gemini-2.5-flash
  */
 
+import { getProjectPriorities } from '@/utils/projectPriorities';
+
 const GEMINI_MODEL = 'gemini-2.5-flash';
 
 const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
@@ -58,9 +60,10 @@ function buildPrompt({
     LANGUAGE_INSTRUCTION[langKey] || LANGUAGE_INSTRUCTION.en;
 
   const p = project || {};
-  const priAF = p.priority_aesthetics_functionality;
-  const priCQ = p.priority_cost_quality;
-  const priSS = p.priority_speed_stability;
+  const priorities = getProjectPriorities(p);
+  const prioritiesBlock = priorities.length
+    ? priorities.map((it) => `- ${it.label}: ${it.value}/100`).join('\n')
+    : '- (none specified)';
 
   const chatBlock = (chatMessages || [])
     .map(
@@ -85,9 +88,8 @@ PROJECT
 - name: ${p.name ?? ''}
 - short description: ${p.description_short ?? ''}
 - north star: ${p.north_star ?? ''}
-- priority aesthetics vs functionality (0–100, 50=balanced): ${priAF ?? 'unknown'}
-- priority cost vs quality (0–100): ${priCQ ?? 'unknown'}
-- priority speed vs stability (0–100): ${priSS ?? 'unknown'}
+- priorities (0–100, higher = more important to protect when conflicts arise):
+${prioritiesBlock}
 
 PARTICIPANTS
 ${peopleBlock || '(none)'}
@@ -325,4 +327,135 @@ export async function requestGeminiAnalysis({
   }
 
   return normalizeAnalysisResult(parsed);
+}
+
+/**
+ * Builds a prompt that asks the model to propose ONE alternative
+ * given an existing analysis (activeConflict + positions + valueMatrix).
+ */
+function buildAlternativePrompt({ project, analysis, language = 'en' }) {
+  const langKey = language === 'ko' || language === 'zh' ? language : 'en';
+  const languageInstruction =
+    LANGUAGE_INSTRUCTION[langKey] || LANGUAGE_INSTRUCTION.en;
+
+  const p = project || {};
+  const priorities = getProjectPriorities(p);
+  const prioritiesBlock = priorities.length
+    ? priorities.map((it) => `- ${it.label}: ${it.value}/100`).join('\n')
+    : '- (none specified)';
+
+  const analysisBlock = analysis
+    ? JSON.stringify(
+        {
+          activeConflict: analysis.activeConflict,
+          positions: analysis.positions,
+          valueMatrix: analysis.valueMatrix,
+        },
+        null,
+        2,
+      )
+    : '(none)';
+
+  return `You are an expert product/engineering facilitator proposing ONE creative third-way alternative to resolve a design sprint conflict.
+
+IMPORTANT: ${languageInstruction}
+
+PROJECT
+- name: ${p.name ?? ''}
+- north star: ${p.north_star ?? ''}
+- priorities (0-100):
+${prioritiesBlock}
+
+EXISTING ANALYSIS
+${analysisBlock}
+
+TASK
+Read the conflict and positions, then propose ONE alternative that satisfies the project's north star and addresses the strongest concerns of each side.
+
+Return JSON only, no markdown fences. Shape:
+{
+  "title": string,
+  "description": string,
+  "pros": [ string ],
+  "cons": [ string ],
+  "alignmentReason": string,
+  "metrics": { "leadTime": string, "riskDelta": string, "confidence": string }
+}
+
+Rules:
+- Keep title under 80 chars, description 1-3 sentences.
+- 3-5 pros, 1-3 cons.
+- metrics strings short (e.g. "+3d", "-20%", "85%").
+- Respond with valid JSON only.`;
+}
+
+function normalizeAlternativeResult(raw) {
+  if (!raw || typeof raw !== 'object') {
+    throw new Error('Invalid JSON from model.');
+  }
+  const o = raw;
+  const pros = Array.isArray(o.pros) ? o.pros.map((x) => String(x)) : [];
+  const cons = Array.isArray(o.cons) ? o.cons.map((x) => String(x)) : [];
+  const metrics = o.metrics && typeof o.metrics === 'object' ? o.metrics : {};
+  return {
+    title: String(o.title || 'Proposal'),
+    description: String(o.description || ''),
+    pros,
+    cons,
+    alignmentReason: String(o.alignmentReason || ''),
+    metrics: {
+      leadTime: String(metrics.leadTime ?? '—'),
+      riskDelta: String(metrics.riskDelta ?? '—'),
+      confidence: String(metrics.confidence ?? '—'),
+    },
+  };
+}
+
+/**
+ * @param {{
+ *   project: Record<string, unknown>,
+ *   analysis: object,
+ *   language?: 'en' | 'ko' | 'zh',
+ * }} input
+ */
+export async function requestGeminiAlternative({ project, analysis, language = 'en' }) {
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+  if (!apiKey || String(apiKey).trim() === '') {
+    throw new Error('VITE_GEMINI_API_KEY is not set.');
+  }
+  const lang = language === 'ko' || language === 'zh' ? language : 'en';
+  const textPrompt = buildAlternativePrompt({ project, analysis, language: lang });
+  const url = `${GEMINI_API_URL}?key=${encodeURIComponent(apiKey)}`;
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ role: 'user', parts: [{ text: textPrompt }] }],
+      generationConfig: {
+        temperature: 0.5,
+        maxOutputTokens: 4096,
+      },
+    }),
+  });
+  if (!res.ok) {
+    const errBody = await res.text();
+    throw new Error(`Gemini ${res.status}: ${errBody.slice(0, 500)}`);
+  }
+  const data = await res.json();
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text || typeof text !== 'string') {
+    throw new Error('Empty or invalid response from Gemini.');
+  }
+  let cleaned = text.trim();
+  if (cleaned.startsWith('```')) {
+    cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/u, '');
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch {
+    throw new Error('Model did not return valid JSON.');
+  }
+  return normalizeAlternativeResult(parsed);
 }

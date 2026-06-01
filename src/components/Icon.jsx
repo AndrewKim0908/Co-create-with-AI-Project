@@ -3,10 +3,13 @@ import {
   Settings, HelpCircle, ChevronsUpDown, ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
   Cpu, PenTool, UserCheck, UserPlus, ArrowRight, Check, X, Plus, Sparkles,
   MessageSquare, Send, Loader, CheckCircle, XCircle, FileText,
-  Download, ZoomIn, ZoomOut, Maximize2, Layers, Eye, EyeOff, Mail, Lock, House, MoreVertical, Upload,   Hand,
-  Pencil,
+  Download, ZoomIn, ZoomOut, Maximize2, Layers, Eye, EyeOff, Mail, Lock, House, MoreVertical, Upload, Hand, LogOut,
+  Pencil, MousePointer2, Trash2, Type,
   Thermometer, Palette, Shield, ClipboardCheck, Package, Hammer, Search, Briefcase, Calendar,
-  Info, Globe,
+  Info, Globe, PanelLeftOpen, PanelLeftClose,
+  AlignLeft, AlignCenter, AlignRight, Crop, ImagePlus, Image as ImageIcon,
+  AlignVerticalJustifyStart, AlignVerticalJustifyCenter, AlignVerticalJustifyEnd,
+  AlignHorizontalJustifyStart, AlignHorizontalJustifyCenter, AlignHorizontalJustifyEnd,
 } from 'lucide-react';
 
 const MAP = {
@@ -64,6 +67,24 @@ const MAP = {
   upload: Upload,
   hand: Hand,
   pencil: Pencil,
+  'log-out': LogOut,
+  'panel-left-open': PanelLeftOpen,
+  'panel-left-close': PanelLeftClose,
+  'mouse-pointer': MousePointer2,
+  trash: Trash2,
+  type: Type,
+  'align-left': AlignLeft,
+  'align-center': AlignCenter,
+  'align-right': AlignRight,
+  'align-top': AlignVerticalJustifyStart,
+  'align-middle-v': AlignVerticalJustifyCenter,
+  'align-bottom': AlignVerticalJustifyEnd,
+  'align-hl': AlignHorizontalJustifyStart,
+  'align-hc': AlignHorizontalJustifyCenter,
+  'align-hr': AlignHorizontalJustifyEnd,
+  crop: Crop,
+  'image-plus': ImagePlus,
+  image: ImageIcon,
 };
 
 export default function Icon({

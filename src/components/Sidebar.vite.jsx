@@ -1,9 +1,11 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Icon from './Icon';
-import { C, ROLE_COLORS } from '@/constants/colors';
+import { C } from '@/constants/colors';
+import { baseColorForUser } from '@/utils/userColors';
 import { getProjectById } from '@/constants/projects';
 import { useLang } from '@/i18n/LangContext';
+import SettingsModal from './SettingsModal';
 
 // ─── Tokens — keep all sidebar shades in one place ────────────
 const SIDEBAR = {
@@ -81,51 +83,6 @@ function SideNavItem({ item, active, onClick, collapsed }) {
       >
         {item.label}
       </span>
-    </button>
-  );
-}
-
-function BackToHubButton({ onClick, label, collapsed }) {
-  const [hov, setHov] = useState(false);
-  const fg = hov ? SIDEBAR.fgHover : SIDEBAR.fgIdle;
-
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      onMouseEnter={() => setHov(true)}
-      onMouseLeave={() => setHov(false)}
-      title={collapsed ? label : undefined}
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: collapsed ? 'center' : 'flex-start',
-        gap: collapsed ? 0 : 10,
-        width: '100%',
-        padding: collapsed ? '10px 0' : '10px 14px',
-        borderRadius: 8,
-        border: 'none',
-        background: hov ? SIDEBAR.itemHoverBg : 'transparent',
-        color: fg,
-        fontFamily: 'inherit',
-        fontSize: 13,
-        fontWeight: 500,
-        textAlign: 'left',
-        cursor: 'pointer',
-        transition: 'background 140ms ease, color 140ms ease, padding 300ms ease',
-      }}
-    >
-      <Icon name="home" size={16} color={fg} />
-      <span style={{
-        flex: collapsed ? 0 : 1,
-        width: collapsed ? 0 : 'auto',
-        minWidth: 0,
-        overflow: 'hidden',
-        whiteSpace: 'nowrap',
-        opacity: collapsed ? 0 : 1,
-        transition: collapsed ? 'opacity 100ms ease' : 'opacity 200ms ease 150ms',
-        pointerEvents: 'none',
-      }}>{label}</span>
     </button>
   );
 }
@@ -209,16 +166,60 @@ function ProjectContextStrip({ project, onBack, backLabel, collapsed }) {
   );
 }
 
+// ─── Popup menu button ────────────────────────────────────────
+function MenuBtn({ icon, label, onClick, danger, rightSlot }) {
+  const [hov, setHov] = useState(false);
+  const fg = danger
+    ? (hov ? '#dc2626' : '#ef4444')
+    : (hov ? '#111827' : '#374151');
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 10,
+        width: '100%', padding: '7px 10px', borderRadius: 7,
+        background: hov ? '#f3f4f6' : 'transparent',
+        border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+        fontSize: 13, fontWeight: 500, color: fg, textAlign: 'left',
+        transition: 'background 120ms ease, color 120ms ease',
+      }}
+    >
+      {icon && <Icon name={icon} size={15} color={fg} />}
+      <span style={{ flex: 1 }}>{label}</span>
+      {rightSlot}
+    </button>
+  );
+}
+
 // ─── Sidebar ─────────────────────────────────────────────────
 const SIDEBAR_W_EXPANDED = 248;
 const SIDEBAR_W_COLLAPSED = 64;
 
-export default function Sidebar({ user, onLogout }) {
+export default function Sidebar({ user, onLogout, onProfileUpdate }) {
   const { t, lang } = useLang();
   const navigate = useNavigate();
   const location = useLocation();
   const [profileHov, setProfileHov] = useState(false);
   const [collapsed, setCollapsed] = useState(true);
+  const [logoHov, setLogoHov] = useState(false);
+  const [collapseHov, setCollapseHov] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    function handleOutside(e) {
+      if (menuRef.current && !menuRef.current.contains(e.target)) {
+        setMenuOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleOutside);
+    return () => document.removeEventListener('mousedown', handleOutside);
+  }, [menuOpen]);
 
   const projectId = parseProjectId(location.pathname);
   const project = getProjectById(projectId);
@@ -237,19 +238,19 @@ export default function Sidebar({ user, onLogout }) {
       ]
     : [];
 
-  const supportGroup = [
-    { id: 'settings', path: '/settings', label: t('navSettings'), icon: 'settings' },
-    { id: 'help',     path: '/help',     label: t('navHelp'),     icon: 'help-circle' },
-  ];
+  // Workspace-only utility: opens the Sprint Branches popup in WorkspacePage
+  // via a window event. Lives outside `projectGroup` because it is a button
+  // action, not a navigation target — no path/active state.
+  const isOnWorkspace = projectId
+    ? location.pathname.startsWith(`/project/${projectId}/workspace`)
+    : false;
 
   const isActive = (item) => location.pathname === item.path;
-  const showBackToHub = location.pathname !== '/hub';
 
   const roleLabel =
     typeof user?.roleLabel === 'string'
       ? user.roleLabel
       : user?.roleLabel?.[lang] || user?.roleLabel?.en || '';
-  const hubBackLabel = lang === 'ko' ? '프로젝트 허브로 돌아가기' : 'Back to Hub';
 
   const renderGroup = (items) =>
     items.map((item) => (
@@ -263,9 +264,8 @@ export default function Sidebar({ user, onLogout }) {
     ));
 
   return (
+    <>
     <aside
-      onMouseEnter={() => setCollapsed(false)}
-      onMouseLeave={() => setCollapsed(true)}
       style={{
         width: collapsed ? SIDEBAR_W_COLLAPSED : SIDEBAR_W_EXPANDED,
         flexShrink: 0,
@@ -282,79 +282,103 @@ export default function Sidebar({ user, onLogout }) {
       {/* Brand header */}
       <div
         style={{
-          padding: collapsed ? '20px 8px 16px' : '22px 40px 20px 18px',
+          padding: collapsed ? '18px 8px 14px' : '14px 10px 12px 14px',
           display: 'flex',
           alignItems: 'center',
           justifyContent: collapsed ? 'center' : 'flex-start',
-          gap: collapsed ? 0 : 12,
+          gap: collapsed ? 0 : 8,
           transition: 'padding 300ms ease',
+          overflow: 'hidden',
         }}
       >
-        <div
-          style={{
-            width: 38,
-            height: 38,
-            borderRadius: 8,
-            background: 'transparent',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            flexShrink: 0,
-          }}
-        >
+        {/* Collapsed: logo is the expand toggle button */}
+        {collapsed ? (
+          <button
+            type="button"
+            onClick={() => setCollapsed(false)}
+            onMouseEnter={() => setLogoHov(true)}
+            onMouseLeave={() => setLogoHov(false)}
+            title={lang === 'ko' ? '사이드바 열기' : 'Expand sidebar'}
+            style={{
+              width: 34, height: 34, borderRadius: 8,
+              background: logoHov ? 'rgba(0,0,0,0.06)' : 'transparent',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              flexShrink: 0, border: 'none', cursor: 'pointer', padding: 0,
+              transition: 'background 140ms ease',
+            }}
+          >
+            {logoHov
+              ? <Icon name="panel-left-open" size={19} color="rgba(30,42,53,0.6)" />
+              : <img src="/assets/logo-v2.png" alt="Co-Create AI" style={{ width: 28, height: 28, objectFit: 'contain' }} />
+            }
+          </button>
+        ) : (
+          /* Expanded: static logo on the left */
           <img
             src="/assets/logo-v2.png"
             alt="Co-Create AI"
-            style={{ width: 32, height: 32, objectFit: 'contain' }}
+            style={{ width: 26, height: 26, objectFit: 'contain', flexShrink: 0 }}
           />
-        </div>
+        )}
+
+        {/* Brand text — only visible when expanded */}
         <div style={{
-          flex: collapsed ? 0 : 1,
-          width: collapsed ? 0 : 'auto',
-          overflow: 'hidden',
+          flex: 1,
           minWidth: 0,
+          overflow: 'hidden',
           opacity: collapsed ? 0 : 1,
+          maxWidth: collapsed ? 0 : 'none',
           transition: collapsed ? 'opacity 100ms ease' : 'opacity 200ms ease 150ms',
           pointerEvents: collapsed ? 'none' : 'auto',
         }}>
-          <div
-            style={{
-              fontSize: 15,
-              fontWeight: 700,
-              color: '#1E2A35',
-              letterSpacing: '-0.015em',
-              lineHeight: 1.15,
-              whiteSpace: 'nowrap',
-            }}
-          >
+          <div style={{
+            fontSize: 14,
+            fontWeight: 700,
+            color: '#1E2A35',
+            letterSpacing: '-0.015em',
+            lineHeight: 1.2,
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+          }}>
             {t('platformName')}
           </div>
-          <div
-            style={{
-              fontSize: 9.5,
-              fontWeight: 600,
-              letterSpacing: '0.13em',
-              textTransform: 'uppercase',
-              color: SIDEBAR.brandSub,
-              marginTop: 4,
-              whiteSpace: 'nowrap',
-            }}
-          >
+          <div style={{
+            fontSize: 8,
+            fontWeight: 600,
+            letterSpacing: '0.07em',
+            textTransform: 'uppercase',
+            color: SIDEBAR.brandSub,
+            marginTop: 3,
+            lineHeight: 1.4,
+            whiteSpace: 'normal',
+          }}>
             {t('platformSub')}
           </div>
         </div>
+
+        {/* Collapse button — only visible when expanded */}
+        {!collapsed && (
+          <button
+            type="button"
+            onClick={() => { setCollapsed(true); setLogoHov(false); }}
+            onMouseEnter={() => setCollapseHov(true)}
+            onMouseLeave={() => setCollapseHov(false)}
+            title={lang === 'ko' ? '사이드바 닫기' : 'Collapse sidebar'}
+            style={{
+              width: 28, height: 28, borderRadius: 6,
+              background: collapseHov ? 'rgba(0,0,0,0.06)' : 'transparent',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              flexShrink: 0, border: 'none', cursor: 'pointer', padding: 0,
+              transition: 'background 140ms ease',
+            }}
+          >
+            <Icon name="panel-left-close" size={17} color={collapseHov ? SIDEBAR.fgHover : SIDEBAR.fgIdle} />
+          </button>
+        )}
       </div>
 
       <div style={{ height: 1, background: SIDEBAR.divider, margin: collapsed ? '0 8px' : '0 18px', transition: 'margin 300ms ease' }} />
-      {showBackToHub && (
-        <div style={{ padding: collapsed ? '8px 6px 0' : '8px 12px 0', transition: 'padding 300ms ease' }}>
-          <BackToHubButton
-            onClick={() => navigate('/hub')}
-            label={hubBackLabel}
-            collapsed={collapsed}
-          />
-        </div>
-      )}
 
       {inProject && project && (
         <>
@@ -388,164 +412,129 @@ export default function Sidebar({ user, onLogout }) {
 
       {/* Group B — Project nav (only shown when INSIDE a project). */}
       {inProject && (
-        <>
-          <nav
-            style={{
-              padding: collapsed ? '14px 6px 8px' : '14px 12px 8px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 4,
-              transition: 'padding 300ms ease',
-            }}
-          >
-            {renderGroup(projectGroup)}
-          </nav>
-          <div style={{ height: 1, background: SIDEBAR.divider, margin: collapsed ? '6px 8px' : '6px 18px', transition: 'margin 300ms ease' }} />
-        </>
+        <nav
+          style={{
+            padding: collapsed ? '14px 6px 8px' : '14px 12px 8px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 4,
+            transition: 'padding 300ms ease',
+          }}
+        >
+          {renderGroup(hubGroup)}
+          <div style={{ height: 1, background: SIDEBAR.divider, margin: collapsed ? '6px 2px' : '6px 2px', transition: 'margin 300ms ease' }} />
+          {renderGroup(projectGroup)}
+          {isOnWorkspace ? (
+            <SideNavItem
+              item={{ id: 'sprint-branches', label: 'Sprint Branches', icon: 'git-branch' }}
+              active={false}
+              collapsed={collapsed}
+              onClick={() => {
+                window.dispatchEvent(new CustomEvent('open-sprint-settings'));
+              }}
+            />
+          ) : null}
+        </nav>
       )}
-
-      {/* Group C — always shown (Settings / Help) */}
-      <nav
-        style={{
-          padding: collapsed ? '8px 6px' : '8px 12px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 4,
-          transition: 'padding 300ms ease',
-        }}
-      >
-        {renderGroup(supportGroup)}
-      </nav>
 
       <div style={{ flex: 1 }} />
 
       {/* Bottom profile */}
-      <div style={{ padding: collapsed ? '12px 8px 16px' : '12px 14px 16px', transition: 'padding 300ms ease' }}>
-        <button
-          type="button"
-          onClick={onLogout}
-          title={collapsed ? t('logout') : undefined}
-          style={{
-            width: '100%',
-            marginBottom: 8,
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: collapsed ? 0 : 8,
-            padding: collapsed ? '8px 0' : '8px 10px',
-            borderRadius: 8,
-            border: '1px solid rgba(0,0,0,0.1)',
-            background: 'rgba(0,0,0,0.03)',
-            color: '#1E2A35',
-            fontSize: 12,
-            fontWeight: 600,
-            cursor: 'pointer',
-            fontFamily: 'inherit',
-            transition: 'padding 300ms ease',
-          }}
-        >
-          <Icon name="log-out" size={14} color="#1E2A35" />
-          <span style={{
-            width: collapsed ? 0 : 'auto',
-            overflow: 'hidden',
-            whiteSpace: 'nowrap',
-            opacity: collapsed ? 0 : 1,
-            transition: collapsed ? 'opacity 100ms ease' : 'opacity 200ms ease 150ms',
-            pointerEvents: 'none',
-          }}>{t('logout')}</span>
-        </button>
+      <div
+        ref={menuRef}
+        style={{ padding: collapsed ? '12px 8px 16px' : '10px 10px 14px', position: 'relative', transition: 'padding 300ms ease' }}
+      >
+        {/* Popup menu — escapes sidebar overflow when collapsed via position:fixed */}
+        {menuOpen && (
+          <div style={{
+            ...(collapsed
+              ? { position: 'fixed', bottom: 16, left: SIDEBAR_W_COLLAPSED + 6, width: 200 }
+              : { position: 'absolute', bottom: 'calc(100% - 2px)', left: 10, right: 10 }
+            ),
+            background: '#ffffff', borderRadius: 12,
+            boxShadow: '0 4px 24px rgba(0,0,0,0.12), 0 1px 4px rgba(0,0,0,0.08)',
+            border: '1px solid #e5e7eb',
+            padding: '6px', zIndex: 100,
+          }}>
+            <MenuBtn
+              icon="settings"
+              label={t('navSettings')}
+              onClick={() => { setSettingsOpen(true); setMenuOpen(false); }}
+            />
 
+            <div style={{ height: 1, background: '#e5e7eb', margin: '4px 2px' }} />
+
+            <MenuBtn
+              icon="log-out"
+              label={t('logout')}
+              danger
+              onClick={() => { onLogout(); setMenuOpen(false); }}
+            />
+          </div>
+        )}
+
+        {/* Profile trigger button */}
         <button
           type="button"
+          onClick={() => setMenuOpen(v => !v)}
           onMouseEnter={() => setProfileHov(true)}
           onMouseLeave={() => setProfileHov(false)}
           title={collapsed ? `${user?.name || 'Guest'} · ${roleLabel}` : undefined}
           style={{
-            width: '100%',
-            display: 'flex',
-            alignItems: 'center',
+            width: '100%', display: 'flex', alignItems: 'center',
             justifyContent: collapsed ? 'center' : 'flex-start',
-            gap: collapsed ? 0 : 12,
-            padding: collapsed ? '10px 0' : '10px 12px',
+            gap: collapsed ? 0 : 10,
+            padding: collapsed ? '10px 0' : '10px 10px',
             borderRadius: 10,
-            background: profileHov
-              ? 'rgba(0,0,0,0.05)'
-              : 'rgba(0,0,0,0.03)',
+            background: menuOpen
+              ? 'rgba(0,0,0,0.07)'
+              : profileHov ? 'rgba(0,0,0,0.05)' : 'rgba(0,0,0,0.03)',
             border: '1px solid rgba(0,0,0,0.08)',
             cursor: 'pointer',
-            fontFamily: 'inherit',
-            textAlign: 'left',
+            fontFamily: 'inherit', textAlign: 'left',
             transition: 'background 140ms ease, padding 300ms ease',
           }}
         >
-          <div
-            style={{
-              width: 34,
-              height: 34,
-              borderRadius: 8,
-              background: ROLE_COLORS[user?.role] || C.emerald,
-              color: '#fff',
-              fontSize: 12.5,
-              fontWeight: 700,
-              letterSpacing: '0.02em',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: 0,
-              boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
-            }}
-          >
+          <div style={{
+            width: 34, height: 34, borderRadius: 8,
+            background: user?.email ? baseColorForUser(user.email) : C.emerald,
+            color: '#fff', fontSize: 12.5, fontWeight: 700, letterSpacing: '0.02em',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            flexShrink: 0, boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+          }}>
             {user?.initials || '··'}
           </div>
 
           <div style={{
-            flex: collapsed ? 0 : 1,
-            width: collapsed ? 0 : 'auto',
-            overflow: 'hidden',
-            minWidth: 0,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
+            flex: collapsed ? 0 : 1, width: collapsed ? 0 : 'auto',
+            overflow: 'hidden', minWidth: 0,
+            display: 'flex', alignItems: 'center', gap: 6,
             opacity: collapsed ? 0 : 1,
             transition: collapsed ? 'opacity 100ms ease' : 'opacity 200ms ease 150ms',
             pointerEvents: 'none',
           }}>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div
-                style={{
-                  fontSize: 13.5,
-                  fontWeight: 600,
-                  color: '#1E2A35',
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  lineHeight: 1.25,
-                  letterSpacing: '-0.005em',
-                }}
-              >
+              <div style={{
+                fontSize: 13, fontWeight: 600, color: '#1E2A35',
+                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                lineHeight: 1.25, letterSpacing: '-0.005em',
+              }}>
                 {user?.name || 'Guest'}
-              </div>
-              <div
-                style={{
-                  fontSize: 11.5,
-                  color: SIDEBAR.profileSub,
-                  marginTop: 2,
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                }}
-              >
-                {roleLabel}
               </div>
             </div>
             <Icon
-              name="chevron-up-down"
-              size={15}
-              color="rgba(30,42,53,0.35)"
+              name={menuOpen ? 'chevron-up' : 'chevron-down'}
+              size={13}
+              color="rgba(30,42,53,0.4)"
             />
           </div>
         </button>
       </div>
     </aside>
+
+    {settingsOpen && (
+      <SettingsModal user={user} onClose={() => setSettingsOpen(false)} onProfileUpdate={onProfileUpdate} />
+    )}
+    </>
   );
 }

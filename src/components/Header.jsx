@@ -14,7 +14,7 @@ export default function Header({
   action,
   actionLabel,
   onBack,
-  showLangSwitcher = true,
+  showLangSwitcher = false,
   /** When false, hides the pulsing “Live session” row (e.g. workspace). */
   showLiveSession = true,
   /** When set, renders instead of the default `LangSwitcher`. */

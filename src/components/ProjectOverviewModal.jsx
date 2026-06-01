@@ -8,10 +8,7 @@ import {
   formatTimelineStatusLabel,
   getProgressTimelineMeta,
 } from '@/utils/projectProgress';
-
-function interpolate(template, pct) {
-  return String(template || '').replace(/\{\{pct\}\}/g, String(pct));
-}
+import { getProjectPriorities, getImportanceMeta } from '@/utils/projectPriorities';
 
 function SectionTitle({ children }) {
   return (
@@ -30,50 +27,14 @@ function SectionTitle({ children }) {
   );
 }
 
-function ReadOnlyPriorityRow({
-  value,
-  leftHint,
-  rightHint,
-  labelLeft,
-  labelRight,
-  balancedLabel,
-}) {
-  const label =
-    value === 50
-      ? balancedLabel
-      : value > 50
-        ? interpolate(labelRight, value)
-        : interpolate(labelLeft, 100 - value);
-
+function ReadOnlyPriorityRow({ label, value }) {
+  const importance = getImportanceMeta(value);
   return (
-    <div style={{ marginBottom: 14 }}>
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          gap: 8,
-          fontSize: 10,
-          color: C.fg3,
-          marginBottom: 6,
-        }}
-      >
-        <span style={{ flex: 1 }}>{leftHint}</span>
-        <span
-          style={{
-            fontSize: 11,
-            fontWeight: 600,
-            color: C.fg2,
-            whiteSpace: 'nowrap',
-            minWidth: 120,
-            textAlign: 'center',
-          }}
-        >
-          {label}
-        </span>
-        <span style={{ flex: 1, textAlign: 'right' }}>{rightHint}</span>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+      <div style={{ width: 144, flexShrink: 0, fontSize: 12, fontWeight: 600, color: C.fg1 }}>
+        {label}
       </div>
-      <div style={{ position: 'relative', height: 22, display: 'flex', alignItems: 'center' }}>
+      <div style={{ flex: 1, position: 'relative', height: 22, display: 'flex', alignItems: 'center', minWidth: 0 }}>
         <div
           aria-hidden
           style={{
@@ -82,9 +43,9 @@ function ReadOnlyPriorityRow({
             right: 0,
             height: 6,
             borderRadius: 3,
-            background: 'linear-gradient(to right, #3A6EA5 0%, #06b6d4 100%)',
+            background: `linear-gradient(to right, #e5e7eb 0%, ${importance.color} 100%)`,
             pointerEvents: 'none',
-            opacity: 0.5,
+            opacity: 0.6,
           }}
         />
         <input
@@ -102,10 +63,16 @@ function ReadOnlyPriorityRow({
             height: 22,
             margin: 0,
             background: 'transparent',
-            accentColor: value <= 50 ? '#3A6EA5' : '#06b6d4',
+            accentColor: importance.color,
             cursor: 'default',
           }}
         />
+      </div>
+      <div style={{ width: 32, flexShrink: 0, textAlign: 'right', fontSize: 11, fontWeight: 700, color: C.fg2, fontVariantNumeric: 'tabular-nums' }}>
+        {value}
+      </div>
+      <div style={{ width: 110, flexShrink: 0, fontSize: 11, fontWeight: 600, color: importance.color, textAlign: 'left' }}>
+        {importance.label}
       </div>
     </div>
   );
@@ -123,9 +90,7 @@ export default function ProjectOverviewModal({ open, isOpen, onClose, project })
   const detail = project.description_detail != null ? String(project.description_detail).trim() : '';
   const north = project.north_star != null ? String(project.north_star).trim() : '';
 
-  const pAf = Math.min(100, Math.max(0, Math.round(Number(project.priority_aesthetics_functionality) || 50)));
-  const pCq = Math.min(100, Math.max(0, Math.round(Number(project.priority_cost_quality) || 50)));
-  const pSs = Math.min(100, Math.max(0, Math.round(Number(project.priority_speed_stability) || 50)));
+  const priorities = getProjectPriorities(project);
 
   const sd = project.start_date ?? null;
   const dd = project.due_date ?? null;
@@ -220,32 +185,17 @@ export default function ProjectOverviewModal({ open, isOpen, onClose, project })
         </div>
 
         <SectionTitle>{t('conflictPriorities')}</SectionTitle>
-        <div style={{ fontSize: 11, color: C.fg3, marginBottom: 4 }}>{t('newProjectPriorityIntro')}</div>
+        <div style={{ fontSize: 11, color: C.fg3, marginBottom: 8 }}>
+          Set how much each factor matters in this project (0 = ignore, 100 = critical)
+        </div>
 
-        <ReadOnlyPriorityRow
-          value={pAf}
-          leftHint={t('newProjectPriorityAesthetics')}
-          rightHint={t('newProjectPriorityFunctionality')}
-          labelLeft={t('newProjectPriAfLeft')}
-          labelRight={t('newProjectPriAfRight')}
-          balancedLabel={t('newProjectPriorityBalanced')}
-        />
-        <ReadOnlyPriorityRow
-          value={pCq}
-          leftHint={t('newProjectPriorityCost')}
-          rightHint={t('newProjectPriorityQuality')}
-          labelLeft={t('newProjectPriCqLeft')}
-          labelRight={t('newProjectPriCqRight')}
-          balancedLabel={t('newProjectPriorityBalanced')}
-        />
-        <ReadOnlyPriorityRow
-          value={pSs}
-          leftHint={t('newProjectPrioritySpeed')}
-          rightHint={t('newProjectPriorityStability')}
-          labelLeft={t('newProjectPriSsLeft')}
-          labelRight={t('newProjectPriSsRight')}
-          balancedLabel={t('newProjectPriorityBalanced')}
-        />
+        {priorities.length === 0 ? (
+          <div style={{ fontSize: 12, color: C.fg3 }}>—</div>
+        ) : (
+          priorities.map((p, i) => (
+            <ReadOnlyPriorityRow key={`${p.label}-${i}`} label={p.label} value={p.value} />
+          ))
+        )}
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
           <Btn variant="primary" size="sm" type="button" onClick={() => onClose?.()}>

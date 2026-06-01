@@ -46,8 +46,5 @@ export const ROLE_MAP = {
   },
 };
 
-export const ROLE_COLORS = {
-  engineer: '#06b6d4',
-  designer: '#6b7280',
-  lead: '#C88A1A',
-};
+// Per-user colors moved to src/utils/userColors.js (email-keyed, viewer-relative).
+// ROLE_COLORS (role→color) was retired as part of that unification.

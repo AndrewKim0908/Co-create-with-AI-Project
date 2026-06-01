@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 
 import Layout from '@/components/Layout';
@@ -15,68 +15,103 @@ import DemoPage from '@/pages/DemoPage';
 import { useLang } from '@/i18n/LangContext';
 import { supabase } from '@/lib/supabase';
 
+const ROLE_LABELS = {
+  pm:          { en: 'Project Manager',  ko: '프로젝트 매니저' },
+  designer:    { en: 'Product Designer', ko: '제품 디자이너' },
+  engineer:    { en: 'Engineer',         ko: '엔지니어' },
+  marketer:    { en: 'Marketer',         ko: '마케터' },
+  manufacture: { en: 'Manufacture',      ko: 'Manufacture' },
+  other:       { en: 'Member',           ko: '멤버' },
+};
+
+function makeInitials(name = '') {
+  return name
+    .split(/[\s._@-]/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map(s => s[0]?.toUpperCase() || '')
+    .join('')
+    .slice(0, 2) || 'U';
+}
+
 export default function App() {
   const { lang } = useLang();
-  const [authUser, setAuthUser] = useState(null);
-  const [ready, setReady] = useState(false);
+  const [authUser, setAuthUser]     = useState(null);
+  const [ready, setReady]           = useState(false);
+  const [profileData, setProfileData] = useState({ fullName: null, role: null });
+
+  // Load profile row (full_name, role) for the given user id
+  const fetchProfile = useCallback(async (uid) => {
+    if (!uid) return;
+    const { data } = await supabase
+      .from('profiles')
+      .select('full_name, role')
+      .eq('id', uid)
+      .single();
+    if (data) {
+      setProfileData({
+        fullName: data.full_name ?? null,
+        role:     data.role     ?? null,
+      });
+    }
+  }, []);
 
   useEffect(() => {
     let alive = true;
 
     supabase.auth.getSession().then(({ data }) => {
       if (!alive) return;
-      setAuthUser(data.session?.user ?? null);
+      const u = data.session?.user ?? null;
+      setAuthUser(u);
       setReady(true);
+      if (u) fetchProfile(u.id);
     });
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      setAuthUser(session?.user ?? null);
+      const u = session?.user ?? null;
+      setAuthUser(u);
       setReady(true);
+      if (u) fetchProfile(u.id);
+      else setProfileData({ fullName: null, role: null });
     });
 
-    return () => {
-      alive = false;
-      listener.subscription.unsubscribe();
-    };
+    return () => { alive = false; listener.subscription.unsubscribe(); };
+  }, [fetchProfile]);
+
+  // Called by SettingsModal after a successful DB save
+  const handleProfileUpdate = useCallback((updates) => {
+    setProfileData(prev => ({ ...prev, ...updates }));
   }, []);
 
   const user = useMemo(() => {
     if (!authUser) return null;
-    const email = authUser.email || 'User';
-    const initials = email
-      .split('@')[0]
-      .split(/[._-]/)
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((s) => s[0]?.toUpperCase() || '')
-      .join('')
-      .slice(0, 2) || 'U';
+    const email    = authUser.email || 'User';
+    const display  = profileData.fullName || email;
+    const roleId   = profileData.role || 'engineer';
+    const roleMeta = ROLE_LABELS[roleId];
     return {
-      id: authUser.id,
-      name: email,
-      initials,
-      role: 'engineer',
-      roleLabel: lang === 'ko' ? 'Authenticated User' : lang === 'zh' ? 'Authenticated User' : 'Authenticated User',
+      id:        authUser.id,
+      name:      display,
+      initials:  makeInitials(display),
+      role:      roleId,
+      roleLabel: roleMeta ? (lang === 'ko' ? roleMeta.ko : roleMeta.en) : roleId,
       email,
     };
-  }, [authUser, lang]);
+  }, [authUser, profileData, lang]);
 
   if (!ready) return null;
 
   return (
     <Routes>
-      {/* Public: 랜딩·인증만. 로그인 시 / · /login · /signup → /hub */}
       <Route path="/" element={user ? <Navigate to="/hub" replace /> : <LandingPage />} />
       <Route path="/login" element={user ? <Navigate to="/hub" replace /> : <LoginPage />} />
       <Route path="/signup" element={user ? <Navigate to="/hub" replace /> : <SignupPage />} />
       <Route path="/demo" element={<DemoPage />} />
 
-      <Route element={<Layout user={user} />}>
-        <Route path="/hub" element={<HubPage user={user} />} />
+      <Route element={<Layout user={user} onProfileUpdate={handleProfileUpdate} />}>
+        <Route path="/hub"    element={<HubPage user={user} />} />
         <Route path="/create" element={<CreateProjectPage user={user} />} />
 
-        {/* Project-scoped routes — sidebar + page headers stay
-            in sync with the :projectId param. */}
         <Route path="/project/:projectId/sprints"      element={<WorkspacePage />} />
         <Route path="/project/:projectId/timeline"     element={<TimelinePage />} />
         <Route path="/project/:projectId/stakeholders" element={<StakeholdersPage />} />
@@ -88,8 +123,6 @@ export default function App() {
         <Route path="/consensus"    element={<Navigate to="/hub" replace />} />
 
         <Route path="/reports"  element={<HubPage user={user} />} />
-        <Route path="/settings" element={<HubPage user={user} />} />
-        <Route path="/help"     element={<HubPage user={user} />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />
