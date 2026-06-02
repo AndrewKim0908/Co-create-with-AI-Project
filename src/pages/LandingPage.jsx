@@ -555,37 +555,11 @@ export default function LandingPage() {
 
       <nav style={navStyle}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div
-            style={{
-              width: 34,
-              height: 34,
-              borderRadius: 8,
-              background: 'var(--em)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontFamily: "'DM Sans', sans-serif",
-              fontWeight: 700,
-              fontSize: 14,
-              color: 'white',
-            }}
-          >
-            C
-          </div>
-          <div>
-            <div style={{ fontSize: 15, fontWeight: 500, fontFamily: "'DM Sans', sans-serif" }}>Co-Create AI</div>
-            <div
-              style={{
-                fontSize: 9,
-                color: 'var(--muted)',
-                letterSpacing: '1.2px',
-                textTransform: 'uppercase',
-                fontFamily: "'DM Sans', sans-serif",
-              }}
-            >
-              Decision Sprint Platform
-            </div>
-          </div>
+          <img
+            src="/logo2.png"
+            alt="Garam"
+            style={{ height: 34, width: 'auto', display: 'block' }}
+          />
         </div>
         <div style={{ display: 'flex', gap: 32 }}>
           {['Features', 'How it works', 'Results'].map((l) => (

@@ -40,7 +40,7 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-50 to-slate-25 px-4 py-10 font-sans">
+    <div className="relative flex min-h-screen items-center justify-center bg-white px-4 py-10 font-sans">
       <div className="absolute left-6 top-5 z-10">
         <button
           type="button"
@@ -70,7 +70,7 @@ export default function LoginPage() {
 
         <form
           onSubmit={handleSubmit}
-          className="w-full rounded-lg border border-slate-200 bg-white p-7 shadow-[0_4px_24px_rgba(30,42,53,0.08)]"
+          className="w-full rounded-xl bg-white p-7"
         >
           <div className="mb-4">
             <label
@@ -87,7 +87,7 @@ export default function LoginPage() {
               placeholder={t('emailPlaceholder')}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-md border border-slate-200 bg-white px-3 py-2.5 text-sm text-fg-1 placeholder:text-fg-4 transition-colors hover:border-slate-300 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-3 text-sm text-fg-1 placeholder:text-fg-4 transition-colors hover:border-slate-300 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
             />
           </div>
 
@@ -107,7 +107,7 @@ export default function LoginPage() {
                 placeholder={t('passwordPlaceholder')}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full rounded-md border border-slate-200 bg-white px-3 py-2.5 pr-10 text-sm text-fg-1 placeholder:text-fg-4 transition-colors hover:border-slate-300 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-3 pr-10 text-sm text-fg-1 placeholder:text-fg-4 transition-colors hover:border-slate-300 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
               />
               <button
                 type="button"
@@ -124,7 +124,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={!canSubmit || busy}
-            className="group flex w-full items-center justify-center gap-2 rounded-md bg-emerald-300 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-emerald-500 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:ring-offset-2 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-emerald-300 disabled:hover:shadow-sm"
+            className="group flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-500 px-4 py-3 text-sm font-semibold text-white shadow-sm transition-all hover:bg-emerald-600 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:ring-offset-2 active:scale-[0.99] disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400 disabled:shadow-none disabled:hover:bg-slate-100 disabled:hover:shadow-none"
           >
             <span>
               {busy
@@ -145,7 +145,7 @@ export default function LoginPage() {
           ) : null}
 
           <p className="mt-4 w-full text-center text-xs font-medium text-fg-2">
-            <Link to="/signup" className="underline-offset-2 hover:text-fg-1 hover:underline">
+            <Link to="/signup" className="underline-offset-2 transition-colors hover:text-emerald-600 hover:underline">
               {t('authSwitchToSignup')}
             </Link>
           </p>

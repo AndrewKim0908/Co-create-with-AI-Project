@@ -21,16 +21,17 @@ const FIELD_LABEL = {
 
 const INPUT_BASE = {
   width: '100%',
-  padding: '8px 12px',
+  padding: '11px 12px',
   borderRadius: 8,
-  border: '1.5px solid #e5e7eb',
+  border: '1px solid #e5e7eb',
   fontSize: 13.5,
   fontFamily: 'inherit',
   outline: 'none',
   color: '#111827',
   background: '#fff',
   boxSizing: 'border-box',
-  transition: 'border-color 140ms',
+  boxShadow: 'none',
+  transition: 'border-color 140ms, box-shadow 140ms',
 } as const;
 
 const DROPDOWN_TRIGGER = (open: boolean) =>
@@ -39,16 +40,17 @@ const DROPDOWN_TRIGGER = (open: boolean) =>
     alignItems: 'center',
     gap: 8,
     width: '100%',
-    padding: '8px 12px',
+    padding: '11px 12px',
     borderRadius: 8,
-    border: `1.5px solid ${open ? '#6366f1' : '#e5e7eb'}`,
+    border: `1px solid ${open ? '#06b6d4' : '#e5e7eb'}`,
     background: '#fff',
     cursor: 'pointer',
     fontFamily: 'inherit',
     fontSize: 13.5,
     fontWeight: 500,
     color: '#111827',
-    transition: 'border-color 140ms',
+    boxShadow: open ? '0 0 0 3px rgba(6,182,212,0.15)' : 'none',
+    transition: 'border-color 140ms, box-shadow 140ms',
   }) as const;
 
 const DROPDOWN_PANEL = {
@@ -169,7 +171,7 @@ export default function Signup() {
   const roleDotColor = email.trim() ? baseColorForUser(email) : '#9ca3af';
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-50 to-slate-25 px-4 py-10 font-sans">
+    <div className="relative flex min-h-screen items-center justify-center bg-white px-4 py-10 font-sans">
       <div className="absolute left-6 top-5 z-10">
         <button
           type="button"
@@ -204,7 +206,7 @@ export default function Signup() {
 
         <form
           onSubmit={onSubmit}
-          className="w-full rounded-lg border border-slate-200 bg-white p-7 shadow-[0_4px_24px_rgba(30,42,53,0.08)]"
+          className="w-full rounded-xl bg-white p-7"
         >
           {/* Name */}
           <div style={{ marginBottom: 16 }}>
@@ -220,8 +222,8 @@ export default function Signup() {
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
               style={INPUT_BASE}
-              onFocus={(e) => { e.currentTarget.style.borderColor = '#6366f1'; }}
-              onBlur={(e) => { e.currentTarget.style.borderColor = '#e5e7eb'; }}
+              onFocus={(e) => { e.currentTarget.style.borderColor = '#06b6d4'; e.currentTarget.style.boxShadow = '0 0 0 3px rgba(6,182,212,0.15)'; }}
+              onBlur={(e) => { e.currentTarget.style.borderColor = '#e5e7eb'; e.currentTarget.style.boxShadow = 'none'; }}
             />
           </div>
 
@@ -239,8 +241,8 @@ export default function Signup() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               style={INPUT_BASE}
-              onFocus={(e) => { e.currentTarget.style.borderColor = '#6366f1'; }}
-              onBlur={(e) => { e.currentTarget.style.borderColor = '#e5e7eb'; }}
+              onFocus={(e) => { e.currentTarget.style.borderColor = '#06b6d4'; e.currentTarget.style.boxShadow = '0 0 0 3px rgba(6,182,212,0.15)'; }}
+              onBlur={(e) => { e.currentTarget.style.borderColor = '#e5e7eb'; e.currentTarget.style.boxShadow = 'none'; }}
             />
           </div>
 
@@ -260,8 +262,8 @@ export default function Signup() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 style={{ ...INPUT_BASE, paddingRight: 38 }}
-                onFocus={(e) => { e.currentTarget.style.borderColor = '#6366f1'; }}
-                onBlur={(e) => { e.currentTarget.style.borderColor = '#e5e7eb'; }}
+                onFocus={(e) => { e.currentTarget.style.borderColor = '#06b6d4'; e.currentTarget.style.boxShadow = '0 0 0 3px rgba(6,182,212,0.15)'; }}
+                onBlur={(e) => { e.currentTarget.style.borderColor = '#e5e7eb'; e.currentTarget.style.boxShadow = 'none'; }}
               />
               <button
                 type="button"
@@ -296,12 +298,16 @@ export default function Signup() {
                   border: `1.5px solid ${confirmPassword.length > 0 && !passwordsMatch ? '#f2b8b4' : '#e5e7eb'}`,
                 }}
                 onFocus={(e) => {
-                  e.currentTarget.style.borderColor =
-                    confirmPassword.length > 0 && !passwordsMatch ? '#D05045' : '#6366f1';
+                  const err = confirmPassword.length > 0 && !passwordsMatch;
+                  e.currentTarget.style.borderColor = err ? '#D05045' : '#06b6d4';
+                  e.currentTarget.style.boxShadow = err
+                    ? '0 0 0 3px rgba(208,80,69,0.15)'
+                    : '0 0 0 3px rgba(6,182,212,0.15)';
                 }}
                 onBlur={(e) => {
                   e.currentTarget.style.borderColor =
                     confirmPassword.length > 0 && !passwordsMatch ? '#f2b8b4' : '#e5e7eb';
+                  e.currentTarget.style.boxShadow = 'none';
                 }}
               />
               <button
@@ -347,16 +353,16 @@ export default function Signup() {
                         style={{
                           display: 'flex', alignItems: 'center', gap: 10, width: '100%',
                           padding: '7px 10px', borderRadius: 7,
-                          background: active ? '#f5f3ff' : 'transparent',
+                          background: active ? '#ecfeff' : 'transparent',
                           border: 'none', cursor: 'pointer', fontFamily: 'inherit',
                           fontSize: 13, fontWeight: active ? 600 : 400,
-                          color: active ? '#4f46e5' : '#374151', textAlign: 'left',
+                          color: active ? '#0891b2' : '#374151', textAlign: 'left',
                         }}
                         onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = '#f9fafb'; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.background = active ? '#f5f3ff' : 'transparent'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = active ? '#ecfeff' : 'transparent'; }}
                       >
                         <span style={{ width: 16, height: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                          {active && <Icon name="check" size={14} color="#4f46e5" />}
+                          {active && <Icon name="check" size={14} color="#0891b2" />}
                         </span>
                         {getRoleLabel(r.id, lang)}
                       </button>
@@ -389,8 +395,8 @@ export default function Signup() {
                           style={{
                             display: 'inline-flex', alignItems: 'center',
                             padding: '2px 8px', borderRadius: 9999,
-                            background: '#f5f3ff', color: '#4f46e5',
-                            border: '1px solid #ddd6fe',
+                            background: '#ecfeff', color: '#0891b2',
+                            border: '1px solid #a5f3fc',
                             fontSize: 11.5, fontWeight: 500, whiteSpace: 'nowrap',
                           }}
                         >
@@ -419,16 +425,16 @@ export default function Signup() {
                         style={{
                           display: 'flex', alignItems: 'center', gap: 10, width: '100%',
                           padding: '7px 10px', borderRadius: 7,
-                          background: active ? '#f5f3ff' : 'transparent',
+                          background: active ? '#ecfeff' : 'transparent',
                           border: 'none', cursor: 'pointer', fontFamily: 'inherit',
                           fontSize: 13, fontWeight: active ? 600 : 400,
-                          color: active ? '#4f46e5' : '#374151', textAlign: 'left',
+                          color: active ? '#0891b2' : '#374151', textAlign: 'left',
                         }}
                         onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = '#f9fafb'; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.background = active ? '#f5f3ff' : 'transparent'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = active ? '#ecfeff' : 'transparent'; }}
                       >
                         <span style={{ width: 16, height: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                          {active && <Icon name="check" size={14} color="#4f46e5" />}
+                          {active && <Icon name="check" size={14} color="#0891b2" />}
                         </span>
                         {opt}
                       </button>
@@ -442,7 +448,7 @@ export default function Signup() {
           <button
             type="submit"
             disabled={!canSubmit || busy}
-            className="group flex w-full items-center justify-center gap-2 rounded-md bg-emerald-300 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-emerald-500 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:ring-offset-2 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-emerald-300 disabled:hover:shadow-sm"
+            className="group flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-500 px-4 py-3 text-sm font-semibold text-white shadow-sm transition-all hover:bg-emerald-600 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:ring-offset-2 active:scale-[0.99] disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400 disabled:shadow-none disabled:hover:bg-slate-100 disabled:hover:shadow-none"
           >
             <span>{busy ? (isKo ? '처리 중...' : 'Processing...') : (isKo ? '회원가입 완료' : 'Create Account')}</span>
             <Icon
@@ -460,7 +466,7 @@ export default function Signup() {
 
           <p className="mt-5 text-center text-xs text-fg-3">
             {isKo ? '이미 계정이 있으신가요?' : 'Already have an account?'}{' '}
-            <Link to="/" className="font-semibold text-fg-1 underline-offset-2 hover:underline">
+            <Link to="/" className="font-semibold text-emerald-600 underline-offset-2 transition-colors hover:text-emerald-700 hover:underline">
               {isKo ? '로그인하기' : 'Sign in'}
             </Link>
           </p>

@@ -16,7 +16,10 @@
       "Bash(npx vite *)",
       "mcp__claude_ai_Supabase__execute_sql",
       "Bash(awk 'NR==8967,/^        \\\\/>/' \"src/pages/WorkspacePage.jsx\")",
-      "Bash(findstr *)"
+      "Bash(findstr *)",
+      "PowerShell($src = \"C:\\\\Users\\\\kjh53\\\\OneDrive\\\\바탕 화면\\\\Co-Create with AI 관련 자료\\\\logo2.png\"; if \\(Test-Path $src\\) { Get-Item $src | Select-Object FullName, Length } else { \"NOT FOUND: $src\" })",
+      "PowerShell(npm run *)",
+      "PowerShell(git add *)"
     ]
   }
 }
