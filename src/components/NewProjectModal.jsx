@@ -160,7 +160,7 @@ export default function NewProjectModal({
       Object.keys(INITIAL_FORM).some((k) => form[k] !== INITIAL_FORM[k]) ||
       priorities.length !== 2 ||
       priorities.some((p) => p.value !== 50 || (p.label !== 'Aesthetics' && p.label !== 'Cost savings'));
-    if (dirty && !window.confirm('작성 중인 내용이 사라집니다. 창을 닫으시겠습니까?')) return;
+    if (dirty && !window.confirm('Your unsaved changes will be lost. Close this window?')) return;
     onClose?.();
   }
 

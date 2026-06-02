@@ -180,7 +180,9 @@ function DesignMarker({
     };
   }, [isActive, marker.xPct, marker.yPct, safeZoom]);
 
-  // ── Speech-bubble marker icon (cyan fill, thick white outline via SVG stroke) ──
+  // ── Speech-bubble marker icon — fill = viewer-resolved author color
+  // (markerColor from the central colorFor system), thick white outline for
+  // contrast. The single path covers body + tail so the whole bubble is one color. ──
   const markerIcon = (
     <svg
       width="28"
@@ -192,7 +194,7 @@ function DesignMarker({
     >
       <path
         d="M61 1C65.4183 1 69 4.58172 69 9V42C69 46.4183 65.4183 50 61 50H15.9268L1 62V9C1 4.58172 4.58172 1 9 1H61Z"
-        fill="#06B6D4"
+        fill={markerColor}
         stroke="white"
         strokeWidth="4"
         strokeLinejoin="round"
@@ -374,7 +376,7 @@ function DesignMarker({
         style={{
           position: 'relative',
           background: '#fff',
-          border: '1.5px solid #06B6D4',
+          border: `1.5px solid ${markerColor}`,
           borderRadius: 11,
           padding: '11px 38px 10px 41px',
           minHeight: 53,
@@ -527,7 +529,7 @@ function DesignMarker({
         <path
           d="M14 0 L0 14 L0 0"
           fill="none"
-          stroke="#06B6D4"
+          stroke={markerColor}
           strokeWidth="1.5"
           strokeLinejoin="miter"
           strokeLinecap="butt"
@@ -581,7 +583,7 @@ function DesignMarker({
           e.stopPropagation();
           if (isPending) return;
           if (isReadOnlySprint) {
-            window.alert('현재 스프린트에서만 삭제 가능합니다');
+            window.alert('Can only delete on the current sprint');
             return;
           }
           if (!canDelete) return;
@@ -4499,13 +4501,13 @@ function BlueprintViewer({
       setSelectMode(true);
     } else {
       if (isReadOnlySprint) {
-        window.alert('마커는 현재 스프린트에서만 추가할 수 있습니다');
+        window.alert('Markers can only be added on the current sprint');
         return;
       }
       const hasAnyImage =
         String(designImageUrl || '').trim() !== '' || pageImages.length > 0;
       if (!hasAnyImage) {
-        window.alert('먼저 디자인 이미지를 업로드해 주세요.');
+        window.alert('Please upload a design image first.');
         return;
       }
       setHandTool(false);
@@ -7422,7 +7424,7 @@ function BlueprintViewer({
             active: markerMode,
             disabled: isReadOnlySprint,
             title: isReadOnlySprint
-              ? '마커는 현재 스프린트에서만 추가할 수 있습니다'
+              ? 'Markers can only be added on the current sprint'
               : t('toolMarker'),
             onClick: toggleMarkerMode,
           },
@@ -8724,7 +8726,7 @@ function ValueMatrixChart({ priorities = [], positionValues = [], projectLineLab
             fontFamily: 'Inter,sans-serif',
           }}
         >
-          분석 후 참여자별 다각형이 추가됩니다
+          Participant polygons appear after analysis
         </div>
       ) : null}
     </div>
@@ -11430,12 +11432,12 @@ function ConflictPanel({
                           <span className="conflict-spin" style={{ display: 'inline-flex' }}>
                             <Icon name="loader" size={14} color="#fff" />
                           </span>
-                          <span>저장 중...</span>
+                          <span>Saving…</span>
                         </>
                       ) : (
                         <>
                           <Icon name="check-circle" size={15} color="#fff" />
-                          <span>합의 저장하기</span>
+                          <span>Save Consensus</span>
                         </>
                       )}
                     </button>
@@ -11451,7 +11453,7 @@ function ConflictPanel({
                         borderRadius: 6,
                       }}
                     >
-                      모든 멤버 투표 완료 — 프로젝트 오너의 저장을 기다리는 중
+                      All members have voted — waiting for the project owner to save
                     </div>
                   )}
                 </div>
@@ -12645,7 +12647,7 @@ function SprintTimelinePanel({
                   e.currentTarget.style.filter = 'brightness(1)';
                   e.currentTarget.style.boxShadow = '0 3px 12px rgba(6,182,212,0.30)';
                 }}
-                title="새로운 갈래 만들기"
+                title="New Branch"
                 style={{
                   position: 'absolute',
                   bottom: 6,
@@ -12670,7 +12672,7 @@ function SprintTimelinePanel({
                 }}
               >
                 <Icon name="git-branch" size={13} color="#fff" />
-                <span>새로운 갈래 만들기</span>
+                <span>New Branch</span>
               </button>
             ) : null}
           </div>
@@ -13059,7 +13061,7 @@ function SprintBranchesPopup({
         >
           <div style={{ fontSize: 11, color: C.fg3, lineHeight: 1.5 }}>
             {branchPickerActive
-              ? '갈래의 부모가 될 스프린트 노드를 선택하세요.'
+              ? 'Select the sprint node to branch from.'
               : ''}
           </div>
           {branchPickerActive ? (
@@ -13079,7 +13081,7 @@ function SprintBranchesPopup({
                 fontWeight: 600,
               }}
             >
-              취소
+              Cancel
             </button>
           ) : (
             <button
@@ -13103,7 +13105,7 @@ function SprintBranchesPopup({
               }}
             >
               <Icon name="git-branch" size={16} color="#fff" />
-              <span>새로운 갈래 만들기</span>
+              <span>New Branch</span>
             </button>
           )}
         </div>
@@ -14991,7 +14993,7 @@ export default function WorkspacePage() {
             }}
           >
             <div style={{ fontSize: 13, lineHeight: 1.55, color: C.fg1 }}>
-              {`Sprint ${branchConfirm.label} 다음으로 새 스프린트를 생성합니다. 계속할까요?`}
+              {`Create a new sprint after Sprint ${branchConfirm.label}. Continue?`}
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
               <button
@@ -15033,7 +15035,7 @@ export default function WorkspacePage() {
                   boxShadow: '0 4px 15px rgba(6,182,212,0.3)',
                 }}
               >
-                확인
+                Confirm
               </button>
             </div>
           </div>

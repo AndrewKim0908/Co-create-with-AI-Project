@@ -614,8 +614,8 @@ export default function LandingPage() {
           <button
             type="button"
             className="theme-toggle"
-            aria-label={theme === 'dark' ? '라이트 모드로 전환' : '다크 모드로 전환'}
-            title={theme === 'dark' ? '라이트 모드' : '다크 모드'}
+            aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            title={theme === 'dark' ? 'Light mode' : 'Dark mode'}
             onClick={toggleTheme}
           >
             {theme === 'dark' ? (

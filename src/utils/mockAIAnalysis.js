@@ -10,9 +10,9 @@ export const mockAIAnalysisResult = {
     id: 'CF-01',
     title: 'Mounting Point Tolerance',
     summary:
-      '엔지니어와 디자이너가 마운팅 포인트의 공차 기준에 대해 다른 의견을 가지고 있습니다.',
+      'The engineer and designer disagree on the tolerance spec for the mounting points.',
     content:
-      'EV Thermal Module A의 마운팅 포인트에서 ±0.5mm와 ±0.3mm 사이의 공차 기준에 대한 갈등이 발생했습니다. 엔지니어는 제조 비용과 양산 효율성을 고려해 ±0.5mm를 주장하는 반면, 디자이너는 제품의 외관 품질과 조립 정밀도를 위해 ±0.3mm를 요구하고 있습니다.',
+      'A conflict has arisen over the tolerance spec for the mounting points of EV Thermal Module A — between ±0.5mm and ±0.3mm. The engineer argues for ±0.5mm given manufacturing cost and mass-production efficiency, while the designer requires ±0.3mm for exterior quality and assembly precision.',
   },
 
   // 2. Positions
@@ -23,7 +23,7 @@ export const mockAIAnalysisResult = {
       role: 'Engineer',
       titleSummary: 'Accept ±0.5mm tolerance',
       detailedPosition:
-        '양산 단계에서 ±0.3mm 공차를 유지하려면 추가 설비 투자와 검사 공정이 필요합니다. ±0.5mm는 현재 라인에서 안정적으로 달성 가능하며, 제조 비용을 약 15% 절감할 수 있습니다. 또한 불량률도 낮아져 전체적인 효율성이 향상됩니다.',
+        'Maintaining a ±0.3mm tolerance in mass production would require additional equipment investment and inspection steps. ±0.5mm is reliably achievable on the current line and cuts manufacturing cost by about 15%. It also lowers the defect rate, improving overall efficiency.',
     },
     {
       userId: 'user-2',
@@ -31,7 +31,7 @@ export const mockAIAnalysisResult = {
       role: 'Designer',
       titleSummary: 'Require ±0.3mm tolerance',
       detailedPosition:
-        '±0.3mm 공차는 제품의 시각적 품질과 사용자 경험에 직결됩니다. 모듈 간 갭이 일정하지 않으면 프리미엄 제품으로서의 가치가 떨어지고, 사용자가 분리/조립 시 부드러운 동작을 보장할 수 없습니다. 환경 친화적 모듈러 디자인이라는 핵심 가치를 위해 정밀도가 필수입니다.',
+        'A ±0.3mm tolerance directly affects the visual quality and user experience of the product. Inconsistent gaps between modules reduce its value as a premium product and cannot guarantee smooth operation when users detach or assemble it. Precision is essential to the core value of eco-friendly modular design.',
     },
   ],
 
@@ -60,18 +60,18 @@ export const mockAIAnalysisResult = {
   alternative: {
     title: 'Adaptive Gasket System',
     description:
-      'Variable-hardness gasket (Shore A 45-62)을 사용하여 ±0.5mm 변동을 흡수하면서도 ±0.3mm 구조 사양을 충족하는 하이브리드 솔루션입니다.',
+      'A hybrid solution using a variable-hardness gasket (Shore A 45-62) that absorbs ±0.5mm variation while still meeting the ±0.3mm structural spec.',
     pros: [
-      '제조 공차 ±0.5mm 허용으로 비용 절감',
-      '최종 조립 시 ±0.3mm 정밀도 달성',
-      'EV-EN Module B에서 검증된 기술',
+      'Cost savings by allowing a ±0.5mm manufacturing tolerance',
+      'Achieves ±0.3mm precision at final assembly',
+      'Technology proven on EV-EN Module B',
     ],
     cons: [
-      '초기 가스켓 개발 비용 발생',
-      '공급업체 선정 및 검증 시간 필요',
+      'Upfront gasket development cost',
+      'Time needed for supplier selection and validation',
     ],
     alignmentReason:
-      "프로젝트의 북극성인 '환경 친화적 모듈러 디자인'을 유지하면서, 제조 효율성(81% 품질 우선)과 안정성(81% 안정성 우선)의 균형을 맞춥니다.",
+      "Maintains the project North Star of an 'eco-friendly modular design' while balancing manufacturing efficiency (81% quality-first) and stability (81% stability-first).",
     metrics: {
       leadTime: '+3d',
       riskDelta: '-72%',
@@ -86,7 +86,7 @@ export const mockAIAnalysisResult = {
 export const mockInsufficientChat = {
   canAnalyze: false,
   reason: 'insufficient_chat',
-  message: 'AI 분석을 위해 더 많은 대화가 필요합니다.',
+  message: 'More discussion is needed for AI analysis.',
   details: [
     {
       userName: 'Andrew Kim',
@@ -107,10 +107,10 @@ export const mockInsufficientChat = {
 export const mockNeedMoreInfo = {
   canAnalyze: false,
   reason: 'need_more_context',
-  message: 'AI가 더 정확한 분석을 위해 다음 주제에 대한 대화가 필요합니다:',
+  message: 'The AI needs more discussion on the following topics for a more accurate analysis:',
   suggestedTopics: [
-    '마운팅 포인트의 실제 사용 환경 (온도, 진동 등)',
-    '비용 제약 사항과 예산 한도',
-    '양산 시점과 출시 일정',
+    'Real-world operating environment of the mounting points (temperature, vibration, etc.)',
+    'Cost constraints and budget limits',
+    'Mass-production timing and launch schedule',
   ],
 };
